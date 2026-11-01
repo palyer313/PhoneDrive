@@ -1,0 +1,19 @@
+{
+  "version": "0.2.4",
+  "result": "No matching personal paths, known device identifiers, personal contact emails, private key blocks or credential tokens found in the reviewed publication set.",
+  "source_files": 286,
+  "scanned_entries": 1038,
+  "excluded": [
+    "signing keystores and properties",
+    "pairing/trust settings",
+    "logs and debug symbols",
+    "machine deployment scripts",
+    "historical documents containing machine references"
+  ],
+  "notes": [
+    "APK signing certificate contains generic PhoneDrive identity only; public certificate is required for APK verification.",
+    "A standalone PRIVATE KEY format marker in APK classes3.dex was reviewed: no key body follows it. Cryptography format parsing strings are retained.",
+    "GPL and third party author attribution is retained.",
+    "Pattern scanning and manual review reduce disclosure risk but do not prove absence of every possible identifier."
+  ]
+}

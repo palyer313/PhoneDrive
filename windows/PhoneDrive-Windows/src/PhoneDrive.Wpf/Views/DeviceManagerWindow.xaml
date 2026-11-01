@@ -1,0 +1,118 @@
+<Window Icon="pack://application:,,,/Assets/PhoneDrive.ico" x:Class="PhoneDrive.Wpf.Views.DeviceManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="1060" Height="700" MinWidth="860" MinHeight="540"
+        WindowStartupLocation="CenterOwner" Title="设备管理 · PhoneDrive"
+        Background="{DynamicResource App.Background}" Foreground="{DynamicResource App.Text}">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <StackPanel>
+                <TextBlock Text="发现的设备与已配对设备" Style="{StaticResource SectionTitle}"/>
+                <TextBlock Text="推荐：点「让手机扫码连接」，手机 PhoneDrive → 设备 → 扫码添加设备，然后在电脑确认。首次保存身份后会自动核对，不用手输 IP 或指纹。手动配对仅作为备用。"
+                           Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,3,8,0"/>
+            </StackPanel>
+        </DockPanel>
+
+        <Border Grid.Row="1" BorderBrush="{DynamicResource App.Border}" BorderThickness="1" CornerRadius="4">
+            <ListView ItemsSource="{Binding Devices}"
+                      SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
+                      BorderThickness="0">
+                <ListView.View>
+                    <GridView ColumnHeaderContainerStyle="{StaticResource ColumnHeaderStyle}">
+                        <GridViewColumn Header="名称" Width="150" DisplayMemberBinding="{Binding Name}"/>
+                        <GridViewColumn Header="类型" Width="66" DisplayMemberBinding="{Binding Type}"/>
+                        <GridViewColumn Header="地址" Width="150" DisplayMemberBinding="{Binding AddressText}"/>
+                        <GridViewColumn Header="状态" Width="190">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding StatusText}" ToolTip="{Binding DetailsText}"
+                                               TextTrimming="CharacterEllipsis">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{DynamicResource App.Text}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IdentityConflict}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource App.Danger}"/>
+                                                        <Setter Property="FontWeight" Value="SemiBold"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="盘符" Width="104">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate>
+                                    <ComboBox ItemsSource="{Binding LetterOptions}"
+                                              SelectedItem="{Binding SelectedLetter, Mode=TwoWay}"
+                                              IsEnabled="{Binding CanEditLetter}"
+                                              Height="24" Padding="4,1" FontSize="11"/>
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Host Key 指纹" Width="360" DisplayMemberBinding="{Binding FingerprintText}"/>
+                    </GridView>
+                </ListView.View>
+            </ListView>
+        </Border>
+
+        <WrapPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+            <Button Content="让手机扫码连接" Command="{Binding PairQrCommand}" Style="{StaticResource AccentButton}" Margin="0,0,8,6"/>
+            <Button Content="手动配对（备用）" Command="{Binding PairManualCommand}"
+                    Margin="0,0,8,6"/>
+            <Button Content="配对此设备" Command="{Binding PairCommand}" Margin="0,0,8,6"/>
+            <Button Content="连接" Command="{Binding ConnectCommand}" Margin="0,0,8,6"/>
+            <Button Content="断开" Command="{Binding DisconnectCommand}" Margin="0,0,8,6"/>
+            <Button Content="挂载" Command="{Binding MountCommand}" Margin="0,0,8,6"/>
+            <Button Content="卸载" Command="{Binding UnmountCommand}" Margin="0,0,8,6"/>
+            <Button Content="撤销授权" Command="{Binding RevokeCommand}" Margin="0,0,8,6"/>
+            <Button Content="刷新" Command="{Binding RefreshCommand}" Margin="0,0,8,6"/>
+            <Button Content="关闭" Command="{Binding CloseCommand}" Margin="0,0,8,6"/>
+        </WrapPanel>
+
+        <Border Grid.Row="3" Background="{DynamicResource App.PanelAlt}" BorderBrush="{DynamicResource App.Border}"
+                BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,0">
+            <StackPanel>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="复制指纹" Padding="8,3"
+                            Command="{Binding CopyFingerprintCommand}" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding PairingHintText}" DockPanel.Dock="Right" Style="{StaticResource MutedText}"
+                               VerticalAlignment="Center" Margin="0,0,14,0"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="本机 Host Key 指纹：" Style="{StaticResource SectionTitle}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding LocalFingerprint}" FontFamily="Consolas" FontSize="11"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </DockPanel>
+
+                <DockPanel Margin="0,8,0,0">
+                    <Button DockPanel.Dock="Right" Content="复制公钥" Padding="8,3"
+                            Command="{Binding CopyPublicKeyCommand}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    <StackPanel>
+                        <TextBlock Text="本机公钥（可加入对端 authorized_keys，私钥永不导出）"
+                                   Style="{StaticResource SectionTitle}" Margin="0,0,0,4"/>
+                        <!-- TextBox.Text 默认 TwoWay，绑只读属性必须显式 OneWay，否则窗口渲染时抛 InvalidOperationException -->
+                        <TextBox Text="{Binding LocalPublicKey, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                                 FontFamily="Consolas" FontSize="11" MaxHeight="52"
+                                 VerticalScrollBarVisibility="Auto"/>
+                    </StackPanel>
+                </DockPanel>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="4" Background="{DynamicResource App.PanelAlt}" BorderBrush="{DynamicResource App.Border}"
+                BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,6,0,0">
+            <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Style="{StaticResource MutedText}"/>
+        </Border>
+    </Grid>
+</Window>

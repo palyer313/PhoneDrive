@@ -1,0 +1,21 @@
+<Window x:Class="PhoneDrive.Wpf.Views.PairQrWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="扫码连接电脑 · PhoneDrive" Icon="pack://application:,,,/Assets/PhoneDrive.ico" Width="500" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource App.Background}" Foreground="{DynamicResource App.Text}" Loaded="Window_Loaded" Closed="Window_Closed">
+    <StackPanel Margin="22">
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+            <Image Source="/Assets/PhoneDrive.png" Width="36" Height="36" Margin="0,0,10,0"/>
+            <StackPanel><TextBlock Text="让手机扫描二维码" FontWeight="SemiBold" FontSize="18"/>
+                <TextBlock Text="手机 PhoneDrive → 设备 → 扫码添加设备" Style="{StaticResource MutedText}"/></StackPanel>
+        </StackPanel>
+        <TextBlock Text="首次配对只需扫码并确认，不用输入 IP、配对码或长串指纹。以后自动验证身份。" TextWrapping="Wrap" Margin="0,0,0,12"/>
+        <ComboBox x:Name="AddressBox" SelectionChanged="Address_Changed" Margin="0,0,0,10" ToolTip="多网卡时选择与手机同一局域网的地址"/>
+        <Border Background="White" Padding="16" HorizontalAlignment="Center"><Image x:Name="QrImage" Width="272" Height="272"/></Border>
+        <TextBlock x:Name="StatusText" Text="正在创建临时邀请…" Margin="0,12,0,8" TextWrapping="Wrap"/>
+        <Border x:Name="ApprovalBox" Visibility="Collapsed" Background="{DynamicResource App.Panel}" Padding="12" Margin="0,0,0,10">
+            <StackPanel><TextBlock x:Name="PeerText" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                <StackPanel Orientation="Horizontal"><Button Content="允许连接" Click="Approve_Click" Style="{StaticResource AccentButton}" Margin="0,0,8,0"/><Button Content="拒绝" Click="Reject_Click"/></StackPanel>
+            </StackPanel>
+        </Border>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="刷新二维码" Click="Refresh_Click" Margin="0,0,8,0"/><Button Content="关闭" Click="Close_Click"/></StackPanel>
+    </StackPanel>
+</Window>

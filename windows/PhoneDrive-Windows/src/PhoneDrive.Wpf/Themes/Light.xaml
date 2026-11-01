@@ -1,0 +1,21 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="App.Background" Color="#F0F0F0"/>
+    <SolidColorBrush x:Key="App.Panel" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="App.PanelAlt" Color="#F4F4F4"/>
+    <SolidColorBrush x:Key="App.Border" Color="#B8BEC6"/>
+    <SolidColorBrush x:Key="App.Text" Color="#17202A"/>
+    <SolidColorBrush x:Key="App.TextMuted" Color="#6B7280"/>
+    <SolidColorBrush x:Key="App.Accent" Color="#1565C0"/>
+    <SolidColorBrush x:Key="App.AccentHover" Color="#1E88E5"/>
+    <SolidColorBrush x:Key="App.AccentText" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="App.Hover" Color="#EAF2FB"/>
+    <SolidColorBrush x:Key="App.Selection" Color="#BDD1E3"/>
+    <SolidColorBrush x:Key="App.Input" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="App.Danger" Color="#C62828"/>
+    <SolidColorBrush x:Key="App.Success" Color="#2E7D32"/>
+    <SolidColorBrush x:Key="App.Warning" Color="#B26A00"/>
+    <SolidColorBrush x:Key="App.GridHeader" Color="#F5F5F5"/>
+    <SolidColorBrush x:Key="App.Toolbar" Color="#F0F0F0"/>
+    <SolidColorBrush x:Key="App.TransferPanel" Color="#F4F4F4"/>
+</ResourceDictionary>

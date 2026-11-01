@@ -1,0 +1,43 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{8483258D-AB46-4B8E-8E08-8E2EB4812C35}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PhoneDrive.Core", "src\PhoneDrive.Core\PhoneDrive.Core.csproj", "{E32FCE5E-7494-4011-A726-EB3E4D748F93}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PhoneDrive.Wpf", "src\PhoneDrive.Wpf\PhoneDrive.Wpf.csproj", "{DBC994EF-7F74-4424-A4C1-CB1138606D5C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{4F9B24FC-A0DD-4660-A7C9-B613C148AE6B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PhoneDrive.Core.Tests", "tests\PhoneDrive.Core.Tests\PhoneDrive.Core.Tests.csproj", "{EF7B1A09-66F1-4659-9F28-F0700DD4956E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E32FCE5E-7494-4011-A726-EB3E4D748F93}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E32FCE5E-7494-4011-A726-EB3E4D748F93}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E32FCE5E-7494-4011-A726-EB3E4D748F93}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E32FCE5E-7494-4011-A726-EB3E4D748F93}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DBC994EF-7F74-4424-A4C1-CB1138606D5C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DBC994EF-7F74-4424-A4C1-CB1138606D5C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DBC994EF-7F74-4424-A4C1-CB1138606D5C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DBC994EF-7F74-4424-A4C1-CB1138606D5C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EF7B1A09-66F1-4659-9F28-F0700DD4956E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EF7B1A09-66F1-4659-9F28-F0700DD4956E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EF7B1A09-66F1-4659-9F28-F0700DD4956E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EF7B1A09-66F1-4659-9F28-F0700DD4956E}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{E32FCE5E-7494-4011-A726-EB3E4D748F93} = {8483258D-AB46-4B8E-8E08-8E2EB4812C35}
+		{DBC994EF-7F74-4424-A4C1-CB1138606D5C} = {8483258D-AB46-4B8E-8E08-8E2EB4812C35}
+		{EF7B1A09-66F1-4659-9F28-F0700DD4956E} = {4F9B24FC-A0DD-4660-A7C9-B613C148AE6B}
+	EndGlobalSection
+EndGlobal

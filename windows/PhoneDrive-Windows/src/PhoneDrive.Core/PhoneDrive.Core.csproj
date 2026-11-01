@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>PhoneDrive.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- SSH.NET 2026.0.0 修复 2024.2.0/2025.0.0 的已知高危公告（NU1903） -->
+    <PackageReference Include="SSH.NET" Version="2026.0.0" />
+    <PackageReference Include="Tmds.MDns" Version="0.10.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>

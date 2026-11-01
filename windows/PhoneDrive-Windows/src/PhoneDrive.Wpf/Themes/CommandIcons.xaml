@@ -1,0 +1,23 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DrawingImage x:Key="Command.Copy"><DrawingImage.Drawing><DrawingGroup>
+        <GeometryDrawing Brush="#8AC0E8" Geometry="M2,1 H10 V11 H2 Z"/>
+        <GeometryDrawing Brush="#E8F3FC" Geometry="M6,5 H14 V15 H6 Z"><GeometryDrawing.Pen><Pen Brush="#4D7CA6" Thickness="1"/></GeometryDrawing.Pen></GeometryDrawing>
+    </DrawingGroup></DrawingImage.Drawing></DrawingImage>
+    <DrawingImage x:Key="Command.Move"><DrawingImage.Drawing><DrawingGroup>
+        <GeometryDrawing Brush="#D6E8F5" Geometry="M1,1 H9 V11 H1 Z"/>
+        <GeometryDrawing Brush="#4684B5" Geometry="M4,10 H10 V7 L15,11 10,15 V12 H4 Z"/>
+    </DrawingGroup></DrawingImage.Drawing></DrawingImage>
+    <DrawingImage x:Key="Command.Rename"><DrawingImage.Drawing><DrawingGroup>
+        <GeometryDrawing Brush="#F6C148" Geometry="M2,11 L11,2 15,6 6,15 1,16 Z"/>
+        <GeometryDrawing Brush="#535D68" Geometry="M11,2 L13,0 17,4 15,6 Z M1,12 L4,15 0,16 Z"/>
+    </DrawingGroup></DrawingImage.Drawing></DrawingImage>
+    <DrawingImage x:Key="Command.New"><DrawingImage.Drawing><DrawingGroup>
+        <GeometryDrawing Brush="#F7BE3A" Geometry="M0,3 H6 L8,5 H16 V15 H0 Z"/>
+        <GeometryDrawing Brush="#FFDF79" Geometry="M0,6 H16 L14,15 H1 Z"/>
+        <GeometryDrawing Brush="#42954C" Geometry="M11,0 H13 V3 H16 V5 H13 V8 H11 V5 H8 V3 H11 Z"/>
+    </DrawingGroup></DrawingImage.Drawing></DrawingImage>
+    <DrawingImage x:Key="Command.Properties"><DrawingImage.Drawing><DrawingGroup>
+        <GeometryDrawing Brush="#EFF4F8" Geometry="M2,0 H12 L15,3 V16 H2 Z"/>
+        <GeometryDrawing Brush="#4D8DC2" Geometry="M6,4 H9 V6 H6 Z M6,8 H9 V14 H6 Z"/>
+    </DrawingGroup></DrawingImage.Drawing></DrawingImage>
+</ResourceDictionary>

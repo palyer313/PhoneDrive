@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- 系统托盘使用 System.Windows.Forms.NotifyIcon（别名引用，避免与 WPF 命名冲突） -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>PhoneDrive.Wpf</RootNamespace>
+    <AssemblyName>PhoneDrive</AssemblyName>
+    <ApplicationIcon>Assets\PhoneDrive.ico</ApplicationIcon>
+    <Version>0.2.4</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- UseWindowsForms 会隐式引入 System.Windows.Forms/System.Drawing 全局 using，
+         会与 WPF 的 Application/KeyEventArgs/Point 等类型冲突；这里移除，托盘代码显式用别名引用 -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\PhoneDrive.ico" />
+    <Resource Include="Assets\PhoneDrive.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Only the portable PNG encoder is needed; do not pull the .NET 6 Windows Drawing adapter. -->
+    <PackageDownload Include="QRCoder" Version="[1.6.0]" />
+    <Reference Include="QRCoder">
+      <HintPath>$(NuGetPackageRoot)/qrcoder/1.6.0/lib/net6.0/QRCoder.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <ProjectReference Include="..\PhoneDrive.Core\PhoneDrive.Core.csproj" />
+  </ItemGroup>
+
+</Project>
