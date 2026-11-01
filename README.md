@@ -42,6 +42,44 @@ Windows 安装器源码位于 installer/PhoneDrive.iss，需要 Inno Setup 6。�
 
 这是预发布软件。Windows 与 Android 发布构建通过；已有核心测试及隔离 SFTP/SSHFS 读写、随机读取、错误指纹拒绝和容量协议测试。曾完成亮屏共享条件下的实际连接与挂载检查。当前 Android 长时间熄屏、自启动和各厂商系统兼容性仍需更多真机验证。
 
+## 作者与开发协作
+
+- **项目发起者与维护者：** [palyer313](https://github.com/palyer313)，负责项目方向、需求、设计取舍与实际使用反馈。
+- **AI 开发协作：** OpenAI Codex，参与代码审查与修复、界面与图标设计、测试、安装包制作及发布准备。
+
+## 参考项目与致谢
+
+感谢以下开源项目及其作者。下表按实际用途说明参考关系；具体版权与许可证声明见 [NOTICE.md](NOTICE.md) 和 [third_party/](third_party/)。
+
+### 界面布局改编
+
+[WinSCP](https://github.com/winscp/winscp) 是 Windows 双栏 Commander 界面的主要来源。PhoneDrive 依据其 [ScpCommander.dfm](https://github.com/winscp/winscp/blob/master/source/forms/ScpCommander.dfm) 的面板、工具栏、路径栏、文件列表及状态栏结构，使用 WPF 重新实现并接入自身服务。原始资源与许可证保存在 [third_party/references/winscp/](third_party/references/winscp/)，对应关系见 [布局移植说明](docs/winscp-layout-port.md)。
+
+### 方案研究与设计参考
+
+以下项目在前期方案研究中提供了参考；列入此处不表示直接依赖或复制其代码。
+
+| 项目 | 参考内容 |
+| --- | --- |
+| [Primitive FTPd](https://github.com/wolpi/prim-ftpd) | Android 文件共享、存储访问适配、SFTP 服务与公钥认证方案。 |
+| [Sshd4a](https://github.com/tfonteyn/Sshd4a) | Android SSH/SFTP 服务及后台服务的产品形态。 |
+| [sshfs-win-tray](https://github.com/huangzhenming/sshfs-win-tray) | Windows SSHFS 挂载管理、托盘交互与便携配置思路。 |
+| [LocalSend](https://github.com/localsend/localsend) | 局域网设备发现、跨设备文件传输及低配置连接体验。 |
+| [KDE Connect](https://github.com/KDE/kdeconnect-android) | 跨设备协作、配对确认与设备信任流程。 |
+
+### 挂载组件与主要依赖
+
+| 项目 | 在 PhoneDrive 中的用途 |
+| --- | --- |
+| [WinFsp](https://github.com/winfsp/winfsp) | Windows 文件系统挂载基础，由用户独立安装。 |
+| [SSHFS-Win](https://github.com/winfsp/sshfs-win) | 以独立进程把远端 SFTP 存储挂载为 Windows 盘符，由用户独立安装。 |
+| [Apache MINA SSHD](https://github.com/apache/mina-sshd) | Android SFTP 服务端与客户端。 |
+| [SSH.NET](https://github.com/sshnet/SSH.NET) | Windows SFTP 连接与文件操作。 |
+| [Tmds.MDns](https://github.com/tmds/Tmds.MDns) | Windows 局域网 mDNS 设备发现。 |
+| [QRCoder](https://github.com/codebude/QRCoder) | Windows 配对二维码生成。 |
+| [ZXing](https://github.com/zxing/zxing) / [ZXing Android Embedded](https://github.com/journeyapps/zxing-android-embedded) | Android 二维码生成与扫描。 |
+| [Android Jetpack Compose](https://developer.android.com/compose) | Android 应用界面。 |
+
 ## 许可证
 
 本项目按 GPL-3.0 发布，见 LICENSE。Windows Commander 布局改编自 WinSCP 的 ScpCommander.dfm；版权及第三方声明见 NOTICE.md 和 third_party/。第三方依赖保留各自许可证。
