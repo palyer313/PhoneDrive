@@ -57,6 +57,8 @@ class SftpServerService : Service() {
         val status = MutableStateFlow(Status())
         private val AUTHORIZED_BLOB = org.apache.sshd.common.AttributeRepository.AttributeKey<String>()
         @Volatile private var liveServer: SshServer? = null
+        @Volatile private var liveService: SftpServerService? = null
+        @JvmStatic fun noteTransferActivity() { liveService?.transferWake?.touch() }
         fun revokeConnections(blob: String) {
             liveServer?.activeSessions?.filter { it.getAttribute(AUTHORIZED_BLOB) == blob }?.forEach { it.close(true) }
         }
@@ -65,12 +67,18 @@ class SftpServerService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var sshd: SshServer? = null
     private val startGeneration = java.util.concurrent.atomic.AtomicInteger()
-    private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var transferWake: TransferWakeLease? = null
     private var nsdAdvertiser: NsdAdvertiser? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val recover = getSharedPreferences("phonedrive_settings", MODE_PRIVATE).getBoolean("recover_service", false)
+        Log.i(TAG, "service command action=${intent?.action ?: "system-restart"} id=$startId recover=$recover")
+        if (intent == null && !recover) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         when (intent?.action) {
             ACTION_STOP -> {
                 stopServer()
@@ -80,7 +88,7 @@ class SftpServerService : Service() {
             else -> {
                 startForegroundWithNotification()
                 startServer()
-                return START_STICKY
+                return if (recover) START_STICKY else START_NOT_STICKY
             }
         }
     }
@@ -127,6 +135,7 @@ class SftpServerService : Service() {
                 val server = SshServer.setUpDefaultServer().apply {
                     host = "0.0.0.0"
                     port = DEFAULT_PORT
+                    addSessionListener(CryptoDiagnosticsListener())
 
                     keyPairProvider = object : KeyPairProvider {
                         override fun loadKeys(session: SessionContext): Iterable<KeyPair> =
@@ -155,6 +164,7 @@ class SftpServerService : Service() {
                     sftpFactory.fileSystemAccessor = ShareFileSystemAccessor { session ->
                         SharePolicy.readOnly(this@SftpServerService, session.getAttribute(AUTHORIZED_BLOB))
                     }
+                    sftpFactory.addSftpEventListener(TransferActivityListener())
                     subsystemFactories = listOf(sftpFactory)
                     // 不设置 shellFactory / commandFactory —— 禁用 shell 与 exec
 
@@ -163,12 +173,10 @@ class SftpServerService : Service() {
                 server.start()
                 sshd = server
                 liveServer = server
-                if (getSharedPreferences("phonedrive_settings", MODE_PRIVATE).getBoolean("screen_off_service", true)) {
-                    wakeLock = (getSystemService(POWER_SERVICE) as android.os.PowerManager)
-                        .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "PhoneDrive:sharing").apply {
-                            setReferenceCounted(false); acquire()
-                        }
+                transferWake = TransferWakeLease(this@SftpServerService) {
+                    getSharedPreferences("phonedrive_settings", MODE_PRIVATE).getBoolean("screen_off_service", true)
                 }
+                liveService = this@SftpServerService
 
                 // mDNS 广播
                 val fingerprint = DeviceIdentity.fingerprintSha256(
@@ -199,7 +207,8 @@ class SftpServerService : Service() {
     @Synchronized
     private fun stopServer() {
         startGeneration.incrementAndGet()
-        wakeLock?.let { if (it.isHeld) it.release() }; wakeLock = null
+        if (liveService === this) liveService = null
+        transferWake?.close(); transferWake = null
         nsdAdvertiser?.stop()
         nsdAdvertiser = null
         val server = sshd

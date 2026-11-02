@@ -14,7 +14,7 @@ public final class CapacitySftpFactory extends SftpSubsystemFactory {
     private final Supplier<long[]> capacity;
     public CapacitySftpFactory(Supplier<long[]> capacity) { this.capacity = capacity; }
     @Override public Command createSubsystem(ChannelSession channel) throws IOException {
-        return new SftpSubsystem(channel, this) {
+        SftpSubsystem subsystem = new SftpSubsystem(channel, this) {
             @Override protected void appendExtensions(Buffer buffer, String version) {
                 super.appendExtensions(buffer, version);
                 buffer.putString("statvfs@openssh.com"); buffer.putString("2");
@@ -35,5 +35,8 @@ public final class CapacitySftpFactory extends SftpSubsystemFactory {
                 }
             }
         };
+        for (org.apache.sshd.sftp.server.SftpEventListener listener : getRegisteredListeners())
+            subsystem.addSftpEventListener(listener);
+        return subsystem;
     }
 }

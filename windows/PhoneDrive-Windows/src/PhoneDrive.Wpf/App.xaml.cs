@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Threading;
 using PhoneDrive.Wpf.Services;
@@ -7,6 +8,8 @@ namespace PhoneDrive.Wpf;
 
 public partial class App : Application
 {
+    public static string DisplayVersion => typeof(App).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "dev";
     private FileStream? _instanceLock;
     private static readonly string CrashLogPath = Path.Combine(PhoneDrive.Core.AppPaths.DataDirectory, "crash.log");
 
@@ -45,7 +48,7 @@ public partial class App : Application
             Shutdown(); return;
         }
         ThemeManager.Apply(new UiStateStore().Load().Theme);
-        PhoneDrive.Core.DiagnosticLog.Write("startup", "PhoneDrive 0.2.4; single instance; " + Environment.ProcessPath);
+        PhoneDrive.Core.DiagnosticLog.Write("startup", $"PhoneDrive {DisplayVersion}; single instance; " + Environment.ProcessPath);
         base.OnStartup(e);
     }
 

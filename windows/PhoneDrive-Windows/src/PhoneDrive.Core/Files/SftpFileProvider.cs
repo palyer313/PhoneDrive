@@ -14,16 +14,27 @@ public sealed class SftpFileProvider : IFileProvider
     private readonly string _deviceId;
     private readonly string? _displayName;
     private int _disposed;
+    private readonly Func<SftpSession>? _transferSessionFactory;
 
-    public SftpFileProvider(string deviceId, string displayName, SftpSession session)
+    public SftpFileProvider(string deviceId, string displayName, SftpSession session, Func<SftpSession>? transferSessionFactory = null)
     {
         _deviceId = deviceId;
         _displayName = displayName;
         _session = session;
+        _transferSessionFactory = transferSessionFactory;
     }
 
     public string DeviceId => _deviceId;
     public SftpSession Session => _session;
+    public bool SupportsPipelinedUpload => _transferSessionFactory != null;
+    public async Task UploadPipelinedAsync(Stream source, string path, Func<CancellationToken, Task> beforeRead,
+        Action<long> acknowledged, CancellationToken ct)
+    {
+        if (_transferSessionFactory == null) throw new NotSupportedException();
+        using var session = await Task.Run(_transferSessionFactory, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        await session.UploadPipelinedAsync(source, path, beforeRead, acknowledged, ct).ConfigureAwait(false);
+    }
     public string Key => "sftp:" + _deviceId;
     public string DisplayName => _displayName ?? _deviceId;
     public string DefaultPath => "/";

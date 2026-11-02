@@ -355,13 +355,22 @@ fun SettingsScreen(onAutoReconnectChanged: () -> Unit = {}) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     var keepAwake by remember { mutableStateOf(AppSettings.prefs(context).getBoolean("screen_off_service", true)) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("熄屏保持共享服务", modifier = Modifier.weight(1f))
+                        Text("传输时保持唤醒", modifier = Modifier.weight(1f))
                         Switch(checked = keepAwake, onCheckedChange = {
                             keepAwake = it
                             AppSettings.prefs(context).edit().putBoolean("screen_off_service", it).apply()
                         })
                     }
-                    Text("共享服务运行时保持处理器工作，不点亮屏幕；会增加耗电。修改后重启共享服务生效。系统强制停止后需手动打开应用。", style = MaterialTheme.typography.bodySmall)
+                    Text("仅文件读写时保持处理器工作，不点亮屏幕；空闲约 15 秒后释放，减少待机耗电。息屏连接仍受系统限制。", style = MaterialTheme.typography.bodySmall)
+                    var recoverService by remember { mutableStateOf(AppSettings.prefs(context).getBoolean("recover_service", false)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("服务被系统结束后自动恢复", modifier = Modifier.weight(1f))
+                        Switch(checked = recoverService, onCheckedChange = {
+                            recoverService = it
+                            AppSettings.prefs(context).edit().putBoolean("recover_service", it).apply()
+                        })
+                    }
+                    Text("默认关闭，减少后台拉起。开启后系统可能多次重启服务；修改后重启共享服务生效。与开机启动开关相互独立。", style = MaterialTheme.typography.bodySmall)
                     OutlinedButton(onClick = {
                         runCatching { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
                     }) { Text("设置电池优化白名单") }

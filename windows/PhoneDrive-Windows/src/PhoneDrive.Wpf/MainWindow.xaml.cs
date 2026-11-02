@@ -138,7 +138,7 @@ public partial class MainWindow : Window
     private void Splitter_DoubleClick(object sender, MouseButtonEventArgs e)
     { LeftColumn.Width = new GridLength(1, GridUnitType.Star); RightColumn.Width = new GridLength(1, GridUnitType.Star); e.Handled = true; }
     private void About_Click(object sender, RoutedEventArgs e) => MessageBox.Show(this,
-        "PhoneDrive 0.2.4\n局域网设备文件管理与安全磁盘挂载\n\nCommander 布局依据 WinSCP 官方 ScpCommander.dfm 移植到 WPF。\nWinSCP: Martin Prikryl and contributors.\nWindows 版本按 GPLv3 提供，完整源码和声明随包附带。\nPhoneDrive 应用图标为原创，文件图标使用 Windows Shell。", "关于 PhoneDrive", MessageBoxButton.OK, MessageBoxImage.Information);
+        $"PhoneDrive {App.DisplayVersion}\n局域网设备文件管理与安全磁盘挂载\n\nCommander 布局依据 WinSCP 官方 ScpCommander.dfm 移植到 WPF。\nWinSCP: Martin Prikryl and contributors.\nWindows 版本按 GPLv3 提供，完整源码和声明随包附带。\nPhoneDrive 应用图标为原创，文件图标使用 Windows Shell。", "关于 PhoneDrive", MessageBoxButton.OK, MessageBoxImage.Information);
 
     private void Exit_Click(object sender, RoutedEventArgs e) => ExitFromTray();
     private void SelectAll_Click(object sender, RoutedEventArgs e) =>

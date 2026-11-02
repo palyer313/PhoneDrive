@@ -36,7 +36,8 @@ public sealed class SftpSession : IDisposable
         System.Security.Cryptography.RSA clientKey, int timeoutMs = 10000)
     {
         // SSH.NET 需要 PEM 私钥
-        var pem = clientKey.ExportRSAPrivateKeyPem();
+        string pem;
+        lock (clientKey) pem = clientKey.ExportRSAPrivateKeyPem();
         using var ms = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(pem));
         var keyFile = new PrivateKeyFile(ms);
 
@@ -129,6 +130,24 @@ public sealed class SftpSession : IDisposable
     public void Upload(Stream source, string remotePath, Action<ulong>? progress = null)
     {
         _client.UploadFile(source, remotePath, progress is null ? null : u => progress(u));
+    }
+
+    /// <summary>Use a dedicated session so cancellation closes every remote handle without disrupting other tasks.</summary>
+    public async Task UploadPipelinedAsync(Stream source, string remotePath,
+        Func<CancellationToken, Task> beforeRead, Action<long> acknowledged, CancellationToken ct = default)
+    {
+        using var bounded = new BoundedUploadSource(source, 64, beforeRead, _client.OperationTimeout);
+        var progress = new UploadProgress(report =>
+        {
+            bounded.AcknowledgeWrite();
+            acknowledged(checked((long)report.TotalBytesUploaded));
+        });
+        await _client.UploadFileAsync(bounded, remotePath, true, progress, ct).ConfigureAwait(false);
+    }
+
+    private sealed class UploadProgress(Action<UploadFileProgressReport> action) : IProgress<UploadFileProgressReport>
+    {
+        public void Report(UploadFileProgressReport value) => action(value);
     }
 
     public void Download(string remotePath, Stream target, Action<ulong>? progress = null)

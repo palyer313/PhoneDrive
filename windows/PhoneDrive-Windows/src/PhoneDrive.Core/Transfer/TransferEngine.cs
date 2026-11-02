@@ -333,6 +333,24 @@ public sealed class TransferEngine : IDisposable
             {
                 using var input = source.OpenRead(task.SourcePath);
                 if (offset > 0) input.Seek(offset, SeekOrigin.Begin);
+                if (offset == 0 && source.Capabilities.Semantics == FsSemantics.Local &&
+                    target is SftpFileProvider { SupportsPipelinedUpload: true } sftp)
+                {
+                    long lastProgress = 0;
+                    await sftp.UploadPipelinedAsync(input, tempPath, token => WaitControlAsync(task, token), bytes =>
+                    {
+                        task.Transferred = Math.Max(task.Transferred, bytes);
+                        if (!task.PauseRequested && Environment.TickCount64 - lastProgress > 400)
+                        {
+                            lastProgress = Environment.TickCount64;
+                            task.Tracker.Sample(task.Transferred, task.Size, out var speed, out var eta);
+                            task.SpeedBytesPerSecond = speed; task.EtaSeconds = eta;
+                            Notify(task); PersistDebounced();
+                        }
+                    }, ct).ConfigureAwait(false);
+                }
+                else
+                {
                 await using var output = offset > 0 ? target.OpenAppend(tempPath) : target.OpenWrite(tempPath);
                 var buffer = new byte[ChunkSize];
                 long lastNotify = 0;
@@ -352,6 +370,7 @@ public sealed class TransferEngine : IDisposable
                     }
                 }
                 await output.FlushAsync(ct).ConfigureAwait(false);
+                }
             }
             task.State = TransferState.Verifying;
             Notify(task);

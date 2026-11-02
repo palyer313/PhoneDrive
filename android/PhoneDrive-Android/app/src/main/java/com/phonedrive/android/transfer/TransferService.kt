@@ -32,20 +32,24 @@ class TransferService : Service() {
         private const val NOTIFICATION_ID = 2001
         private const val ACTION_START = "com.phonedrive.android.action.START_TRANSFER_MONITOR"
         private const val ACTION_STOP = "com.phonedrive.android.action.STOP_TRANSFER_MONITOR"
+        private val startRequested = java.util.concurrent.atomic.AtomicBoolean(false)
 
         fun start(context: Context) {
+            if (!startRequested.compareAndSet(false, true)) return
             val intent = Intent(context, TransferService::class.java).apply { action = ACTION_START }
             runCatching { ContextCompat.startForegroundService(context, intent) }
+                .onFailure { startRequested.set(false) }
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, TransferService::class.java).apply { action = ACTION_STOP }
-            runCatching { context.startService(intent) }
+            startRequested.set(false)
+            context.stopService(Intent(context, TransferService::class.java))
         }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var observeJob: Job? = null
+    private var latestStartId = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -54,14 +58,19 @@ class TransferService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        startRequested.set(true)
+        latestStartId = startId
+        if (observeJob?.isActive == true) return START_NOT_STICKY
         startForegroundWithProgress(0, 0, true)
         observeJob?.cancel()
         observeJob = scope.launch {
             TransferEngine.get(this@TransferService).tasks.collect { tasks ->
                 val active = tasks.filter { it.isActive }
                 if (active.isEmpty()) {
+                    if (TransferEngine.get(this@TransferService).tasks.value.any { it.isActive }) return@collect
                     ServiceCompat.stopForeground(this@TransferService, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                    stopSelf()
+                    startRequested.set(false)
+                    stopSelfResult(latestStartId)
                 } else {
                     val total = active.sumOf { if (it.size > 0) it.size else 0L }
                     val done = active.sumOf { it.transferred.coerceAtMost(it.size) }
@@ -74,6 +83,7 @@ class TransferService : Service() {
     }
 
     override fun onDestroy() {
+        startRequested.set(false)
         observeJob?.cancel()
         scope.cancel()
         super.onDestroy()

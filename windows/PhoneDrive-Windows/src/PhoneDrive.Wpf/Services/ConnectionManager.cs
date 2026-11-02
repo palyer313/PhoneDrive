@@ -58,7 +58,9 @@ public sealed class ConnectionManager : IDisposable
             host, port, device.HostKeyFingerprint, ClientKey, 10000), ct).ConfigureAwait(true);
         if (ct.IsCancellationRequested) { session.Dispose(); ct.ThrowIfCancellationRequested(); }
 
-        var provider = new SftpFileProvider(device.DeviceId, device.Name, session);
+        var expectedFingerprint = device.HostKeyFingerprint;
+        var provider = new SftpFileProvider(device.DeviceId, device.Name, session,
+            () => SftpSession.Connect(host, port, expectedFingerprint, ClientKey, 10000));
         _providers.AddOrUpdate(device.DeviceId, provider, (_, old) =>
         {
             old.Dispose();

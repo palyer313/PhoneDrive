@@ -5,10 +5,13 @@
 #ifndef OutputDir
   #define OutputDir "..\dist"
 #endif
+#ifndef BuildVersion
+  #define BuildVersion "0.2.5-performance-preview"
+#endif
 [Setup]
 AppId={{5A4C6D26-9165-4B0D-BF1C-DB51F1F59B01}
 AppName=PhoneDrive
-AppVersion=0.2.4
+AppVersion={#BuildVersion}
 AppPublisher=PhoneDrive contributors
 DefaultDirName={localappdata}\Programs\PhoneDrive
 DefaultGroupName=PhoneDrive
@@ -17,7 +20,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir={#OutputDir}
-OutputBaseFilename=PhoneDrive-0.2.4-Setup-x64
+OutputBaseFilename=PhoneDrive-{#BuildVersion}-Setup-x64
 SetupIconFile=..\assets\brand\phonedrive.ico
 UninstallDisplayIcon={app}\PhoneDrive.exe
 LicenseFile=..\LICENSE
