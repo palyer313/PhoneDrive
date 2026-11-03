@@ -160,7 +160,7 @@ fun DevicesScreen(
                                 setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                                 setPrompt("对准对方设备上的配对二维码")
                                 setBeepEnabled(false)
-                                setOrientationLocked(true)
+                                setOrientationLocked(false)
                             }
                         )
                     },

@@ -6,7 +6,7 @@
   #define OutputDir "..\dist"
 #endif
 #ifndef BuildVersion
-  #define BuildVersion "0.2.5-performance-preview"
+  #define BuildVersion "0.2.6"
 #endif
 [Setup]
 AppId={{5A4C6D26-9165-4B0D-BF1C-DB51F1F59B01}

@@ -44,6 +44,12 @@
             </intent-filter>
         </activity>
 
+        <!-- Honor the user's rotation setting instead of the scanner library's landscape default. -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="fullUser"
+            tools:replace="android:screenOrientation" />
+
         <service
             android:name=".server.SftpServerService"
             android:exported="false"

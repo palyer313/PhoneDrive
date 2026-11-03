@@ -8,7 +8,8 @@
                 <TextBlock Text="手机 PhoneDrive → 设备 → 扫码添加设备" Style="{StaticResource MutedText}"/></StackPanel>
         </StackPanel>
         <TextBlock Text="首次配对只需扫码并确认，不用输入 IP、配对码或长串指纹。以后自动验证身份。" TextWrapping="Wrap" Margin="0,0,0,12"/>
-        <ComboBox x:Name="AddressBox" SelectionChanged="Address_Changed" Margin="0,0,0,10" ToolTip="多网卡时选择与手机同一局域网的地址"/>
+        <ComboBox x:Name="AddressBox" DisplayMemberPath="DisplayName" SelectionChanged="Address_Changed" Margin="0,0,0,8" ToolTip="优先选择手机可以访问的 Wi-Fi 或以太网地址"/>
+        <TextBlock x:Name="NetworkHintText" TextWrapping="Wrap" Margin="0,0,0,12" Style="{StaticResource MutedText}"/>
         <Border Background="White" Padding="16" HorizontalAlignment="Center"><Image x:Name="QrImage" Width="272" Height="272"/></Border>
         <TextBlock x:Name="StatusText" Text="正在创建临时邀请…" Margin="0,12,0,8" TextWrapping="Wrap"/>
         <Border x:Name="ApprovalBox" Visibility="Collapsed" Background="{DynamicResource App.Panel}" Padding="12" Margin="0,0,0,10">

@@ -8,6 +8,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,6 +50,8 @@ import com.phonedrive.android.remote.ClientKey
 import com.phonedrive.android.security.DeviceIdentity
 import com.phonedrive.android.server.AuthorizedKeysStore
 import com.phonedrive.android.server.SftpServerService
+import com.phonedrive.android.server.ServiceNetworkReadiness
+import com.phonedrive.android.server.StartupNetworkStatus
 import com.phonedrive.android.settings.AppSettings
 import com.phonedrive.android.transfer.TransferEngine
 import kotlinx.coroutines.Dispatchers
@@ -78,6 +82,43 @@ fun SettingsScreen(onAutoReconnectChanged: () -> Unit = {}) {
     var clientKeyLoading by remember { mutableStateOf(true) }
 
     var concurrency by remember { mutableStateOf(AppSettings.transferConcurrency(context)) }
+    var networkIssue by remember { mutableStateOf<StartupNetworkStatus?>(null) }
+    val wifiSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val network = ServiceNetworkReadiness.inspect(context)
+        if (network.canStart) {
+            networkIssue = null
+            startSftpService(context)
+        } else networkIssue = network
+    }
+
+    networkIssue?.let { issue ->
+        AlertDialog(
+            icon = { BrandDialogIcon() },
+            onDismissRequest = { networkIssue = null },
+            title = { Text(issue.title) },
+            text = { Text(issue.message) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val action = if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_WIFI else Settings.ACTION_WIFI_SETTINGS
+                    runCatching { wifiSettings.launch(Intent(action)) }.onFailure {
+                        runCatching { wifiSettings.launch(Intent(Settings.ACTION_WIFI_SETTINGS)) }
+                    }
+                }) { Text("Wi-Fi 设置") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        val network = ServiceNetworkReadiness.inspect(context)
+                        if (network.canStart) {
+                            networkIssue = null
+                            startSftpService(context)
+                        } else networkIssue = network
+                    }) { Text("重试启动") }
+                    TextButton(onClick = { networkIssue = null }) { Text("取消") }
+                }
+            }
+        )
+    }
 
     LaunchedEffect(Unit) {
         val loaded = runCatching {
@@ -123,7 +164,10 @@ fun SettingsScreen(onAutoReconnectChanged: () -> Unit = {}) {
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (status.state != SftpServerService.State.RUNNING) {
-                            Button(onClick = { startSftpService(context) }) { Text("启动服务") }
+                            Button(enabled = status.state != SftpServerService.State.STARTING, onClick = {
+                                val network = ServiceNetworkReadiness.inspect(context)
+                                if (network.canStart) startSftpService(context) else networkIssue = network
+                            }) { Text("启动服务") }
                         } else {
                             OutlinedButton(onClick = { stopSftpService(context) }) { Text("停止服务") }
                         }

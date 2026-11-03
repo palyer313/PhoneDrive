@@ -2,11 +2,17 @@
 
 <img src="assets/brand/phonedrive.png" width="104" alt="PhoneDrive icon">
 
-Android 手机、平板与 Windows 电脑之间的局域网文件管理、传输和磁盘挂载工具。当前预发布版本：**0.2.5-performance-preview**。
+Android 手机、平板与 Windows 电脑之间的局域网文件管理、传输和磁盘挂载工具。当前正式版本：**0.2.6**。
 
-[下载此版本](https://github.com/palyer313/PhoneDrive/releases/tag/v0.2.5-performance-preview) · [更新说明与性能验证](docs/release-0.2.5-performance-preview.md)
+[下载正式版](https://github.com/palyer313/PhoneDrive/releases/tag/v0.2.6) · [更新说明与验证范围](docs/release-0.2.6.md)
 
-本版优化应用内电脑→Android 首次上传，并减少 Android 共享服务空闲时的持续唤醒。Note11 前台亮屏条件下，同一 1 GiB 随机文件连续三轮上传约 **36 MiB/s**，包含两次完整读回校验的全流程为 **11.79–12.08 MiB/s**。资源管理器挂载盘符使用独立的 SSHFS-Win 路径，尚未完成同等长测验收，不能套用上述结果。
+![PhoneDrive 产品与配对界面演示](assets/showcase/overview.png)
+
+界面图截取自用户提供的演示视频，画面为较早的预览版；当前下载版本为正式版 0.2.6。[截图来源说明](docs/media/README.md)
+
+0.2.6 改进 Windows 多网卡配对地址选择与刷新，修正 Android 扫码强制横屏，并在手动启动共享服务前检查 Wi-Fi 与局域网状态。桌面端与 Android 端均提供正式安装包。
+
+本版保留 0.2.5 的应用内上传流水线与空闲唤醒优化。此前 Note11 前台亮屏条件下，同一 1 GiB 随机文件连续三轮上传约 **36 MiB/s**，包含两次完整读回校验的全流程为 **11.79–12.08 MiB/s**；这是 0.2.5 的测试结果，本轮没有重复性能长测。资源管理器挂载盘符使用独立的 SSHFS-Win 路径，尚未完成同等长测验收，不能套用上述结果。
 
 ## 功能
 
@@ -16,6 +22,17 @@ Android 手机、平板与 Windows 电脑之间的局域网文件管理、传输
 - 首次本地→SFTP 上传采用有界流水线，保留固定 Host Key、临时文件、源文件复核与安全提交。
 - 通过独立安装的 WinFsp 和 SSHFS-Win 将手机存储挂载成 Windows 盘符。
 - Android 开机启动开关、熄屏共享设置、系统文件选择器集成。
+
+![Windows 双栏文件管理演示，示例目录与占位文件](assets/showcase/dual-pane.png)
+
+<details>
+<summary>查看更多界面图：传输队列与盘符挂载</summary>
+
+![文件传输队列演示](assets/showcase/transfer.png)
+
+![手机存储盘符挂载演示](assets/showcase/mounted-drive.png)
+
+</details>
 
 ## 安装与使用
 
@@ -45,12 +62,13 @@ Windows 安装器源码位于 installer/PhoneDrive.iss，需要 Inno Setup 6，�
 
 ## 状态与验证边界
 
-这是预发布软件。Windows 与 Android 发布构建通过；Core 44 项测试、Android 7 项单元测试以及实际 SFTP 集成验证通过，覆盖暂停、恢复、取消、续传、错误指纹拒绝和源文件保护。已完成 Note11 应用内三轮 1 GiB 首次上传验收，全部 SHA-256 一致；已有隔离 SFTP/SSHFS 读写、随机读取与容量协议测试。资源管理器复制、续传路径的性能、Android 长时间熄屏及各厂商后台兼容性仍需更多验证。详见[本版验证边界](docs/release-0.2.5-performance-preview.md)。
+本版本作为正式版发布。Windows 与 Android 发布构建通过；Core 48 项、Android 11 项单元测试及实际 SFTP 集成验证通过。0.2.6 同功能候选包已在 Note11 验证扫码页竖屏及当前可用局域网下启动服务；正式包统一版本标识后重新构建。Windows 配对窗口实际操作、多网卡切换后重新扫码、Wi-Fi 关闭/未连接的完整真机提示流程，以及各厂商长时间后台兼容性仍需继续验证。详见[本版验证范围](docs/release-0.2.6.md)。
 
 ## 作者与开发协作
 
 - **项目发起者与维护者：** [palyer313](https://github.com/palyer313)，负责项目方向、需求、设计取舍与实际使用反馈。
 - **AI 开发协作：** OpenAI Codex，参与代码审查与修复、界面与图标设计、测试、安装包制作及发布准备。
+- **演示截图：** 从用户提供的 MiniMax M3.1-Flash 演示视频中截取，见[素材说明](docs/media/README.md)。
 
 ## 参考项目与致谢
 

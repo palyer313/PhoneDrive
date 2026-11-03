@@ -1,6 +1,3 @@
-using System.Net;
-using System.Net.NetworkInformation;
-using System.Net.Sockets;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
@@ -21,31 +18,43 @@ public partial class PairQrWindow : Window
     private TaskCompletionSource<bool>? _approval;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private bool _ready;
+    private bool _refreshingAddresses;
     public PairedDevice? Device { get; private set; }
     public PairQrWindow(ClientIdentity identity, DeviceStore store)
     {
         _identity = identity; _store = store; InitializeComponent();
-        var addresses = NetworkInterface.GetAllNetworkInterfaces()
-            .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType is not (NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel))
-            .OrderByDescending(n => n.GetIPProperties().GatewayAddresses.Any(g => g.Address.AddressFamily == AddressFamily.InterNetwork))
-            .SelectMany(n => n.GetIPProperties().UnicastAddresses)
-            .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork && !a.Address.ToString().StartsWith("169.254."))
-            .Select(a => a.Address.ToString()).Distinct().ToArray();
-        AddressBox.ItemsSource = addresses; if (addresses.Length > 0) AddressBox.SelectedIndex = 0;
+        RefreshAddresses();
         _timer.Tick += (_, _) => {
             if (_server != null && _approval == null)
                 StatusText.Text = _server.ExpiresAt > DateTimeOffset.UtcNow ? $"等待手机扫码 · 剩余 {(int)(_server.ExpiresAt-DateTimeOffset.UtcNow).TotalSeconds} 秒" : "邀请已过期，请刷新二维码";
         };
     }
     private void Window_Loaded(object sender, RoutedEventArgs e) { _ready = true; StartInvitation(); _timer.Start(); }
+    private void RefreshAddresses()
+    {
+        _refreshingAddresses = true;
+        try
+        {
+            var addresses = PairingNetworkAddresses.GetLocal(_store.GetAll()
+                .Select(device => device.LastKnownIp).OfType<string>());
+            AddressBox.ItemsSource = addresses;
+            if (addresses.Count > 0) AddressBox.SelectedIndex = 0;
+        }
+        finally { _refreshingAddresses = false; }
+    }
     private async void StartInvitation()
     {
         _approval?.TrySetResult(false); _approval = null; _server?.Dispose(); _server = null;
+        QrImage.Source = null;
         ApprovalBox.Visibility = Visibility.Collapsed;
-        if (AddressBox.SelectedItem is not string host) { StatusText.Text = "未检测到局域网 IPv4 地址，请连接 Wi-Fi 后重新打开此窗口"; return; }
+        if (AddressBox.SelectedItem is not PairingNetworkAddress selected) {
+            NetworkHintText.Text = "请连接手机所在的 Wi-Fi 或局域网，然后点击“刷新二维码”。";
+            StatusText.Text = "未检测到可用的局域网 IPv4 地址"; return;
+        }
+        NetworkHintText.Text = selected.Guidance;
         try
         {
-            var server = new PairingInvitationServer(_identity, _store, host, RequestApproval);
+            var server = new PairingInvitationServer(_identity, _store, selected.Address, RequestApproval);
             _server = server; var invitation = server.Start();
             using var qr = QRCodeGenerator.GenerateQrCode(invitation.ToJson(), QRCodeGenerator.ECCLevel.M);
             using var png = new PngByteQRCode(qr);
@@ -72,8 +81,8 @@ public partial class PairQrWindow : Window
     }
     private void Approve_Click(object sender, RoutedEventArgs e) { _approval?.TrySetResult(true); ApprovalBox.Visibility = Visibility.Collapsed; StatusText.Text = "正在保存配对…"; }
     private void Reject_Click(object sender, RoutedEventArgs e) { _approval?.TrySetResult(false); _approval = null; ApprovalBox.Visibility = Visibility.Collapsed; }
-    private void Address_Changed(object sender, SelectionChangedEventArgs e) { if (_ready) StartInvitation(); }
-    private void Refresh_Click(object sender, RoutedEventArgs e) => StartInvitation();
+    private void Address_Changed(object sender, SelectionChangedEventArgs e) { if (_ready && !_refreshingAddresses) StartInvitation(); }
+    private void Refresh_Click(object sender, RoutedEventArgs e) { RefreshAddresses(); StartInvitation(); }
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
     private void Window_Closed(object? sender, EventArgs e) { _timer.Stop(); _approval?.TrySetResult(false); _server?.Dispose(); }
 }

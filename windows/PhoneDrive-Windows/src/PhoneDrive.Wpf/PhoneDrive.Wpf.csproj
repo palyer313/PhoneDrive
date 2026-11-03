@@ -11,7 +11,7 @@
     <RootNamespace>PhoneDrive.Wpf</RootNamespace>
     <AssemblyName>PhoneDrive</AssemblyName>
     <ApplicationIcon>Assets\PhoneDrive.ico</ApplicationIcon>
-    <Version>0.2.5-performance-preview</Version>
+    <Version>0.2.6</Version>
   </PropertyGroup>
 
   <ItemGroup>

@@ -21,8 +21,8 @@ android {
         applicationId = "com.phonedrive.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.2.5-power-preview"
+        versionCode = 8
+        versionName = "0.2.6"
     }
 
     signingConfigs {
