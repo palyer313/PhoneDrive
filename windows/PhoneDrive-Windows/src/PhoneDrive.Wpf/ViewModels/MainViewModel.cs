@@ -21,6 +21,7 @@ namespace PhoneDrive.Wpf.ViewModels;
 /// </summary>
 public sealed class MainViewModel : ObservableObject, IDisposable
 {
+    private IncomingShareService? _incomingShares;
     private readonly ClientIdentity _identity;
     private readonly DeviceStore _store;
     private readonly DeviceDiscovery _discovery;
@@ -178,7 +179,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public async Task InitializeAsync()
     {
         _uiState = _uiStateStore.Load();
-        ThemeManager.Apply(_uiState.Theme);
+        ThemeManager.Apply(_uiState.Theme, _uiState.AccentColor);
         IsTransferPanelVisible = _uiState.TransferPanelVisible;
         ApplyIntegrationSettings();
 
@@ -201,6 +202,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         await RestorePaneAsync(LeftPane, _uiState.Left, preferDevice: false);
         await RestorePaneAsync(RightPane, _uiState.Right, preferDevice: true);
 
+        if (Environment.GetEnvironmentVariable("PHONEDRIVE_DISABLE_NETWORK") != "1")
+        { _incomingShares = new IncomingShareService(this); _incomingShares.Start(); }
         UpdateDeviceSummary();
         SetStatus("就绪 · 双击进入文件夹，F5 复制 / F6 移动 / F7 新建文件夹 / F8 删除");
         UpdateCommandStates();
@@ -762,8 +765,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         window.ShowDialog();
         vm.Dispose();
         _uiState.Theme = ThemeManager.Current;
+        _uiState.AccentColor = ThemeManager.AccentColor;
         _uiState = _uiStateStore.Load();
-        ThemeManager.Apply(_uiState.Theme);
+        ThemeManager.Apply(_uiState.Theme, _uiState.AccentColor);
         ApplyIntegrationSettings();
     }
 
@@ -830,6 +834,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _uiState.LeftPaneRatio = leftRatio;
         _uiState.TransferPanelVisible = IsTransferPanelVisible;
         _uiState.Theme = ThemeManager.Current;
+        _uiState.AccentColor = ThemeManager.AccentColor;
         _uiState.ShowHidden = LeftPane.ActiveTab?.ShowHidden ?? _uiState.ShowHidden;
         _uiState.Left = CapturePane(LeftPane);
         _uiState.Right = CapturePane(RightPane);
@@ -884,6 +889,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _incomingShares?.Dispose();
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
         _discovery.DeviceFound -= OnDeviceFound;

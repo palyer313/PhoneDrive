@@ -65,6 +65,7 @@ public sealed class UiState
     public double LeftPaneRatio { get; set; } = 0.5;
     public bool TransferPanelVisible { get; set; } = true;
     public string Theme { get; set; } = "system";
+    public string AccentColor { get; set; } = "#1565C0";
     public bool ShowHidden { get; set; }
 
     /// <summary>关闭主窗口时最小化到托盘（false = 关闭直接退出）</summary>

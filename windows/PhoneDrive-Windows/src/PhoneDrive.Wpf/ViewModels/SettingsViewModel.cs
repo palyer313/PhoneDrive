@@ -15,8 +15,13 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
     private readonly TransferEngine _engine;
     private readonly UiStateStore _store;
     private string _themeChoice;
+    private string _accentColor = "#1565C0";
+    public string AccentColor { get => _accentColor; set => SetProperty(ref _accentColor, value); }
+    private string _receiveFolder = ShareReceiveSettings.Load().Folder;
+    public string ReceiveFolder { get => _receiveFolder; set => SetProperty(ref _receiveFolder, value); }
     private int _concurrency;
     private bool _startWithWindows;
+    private readonly bool _originalStartWithWindows;
     private bool _minimizeToTray;
     private bool _autoConnectOnStartup;
     private bool _autoMountOnStartup;
@@ -31,11 +36,13 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         _themeChoice = ThemeManager.Normalize(state.Theme) switch
         {
             ThemeManager.Light => "浅色",
-            ThemeManager.Dark => "深色",
+            ThemeManager.Dark => "夜间模式",
             _ => "跟随系统",
         };
+        AccentColor = ThemeManager.NormalizeColor(state.AccentColor);
         _concurrency = engine.MaxConcurrency;
         _startWithWindows = StartupService.IsEnabled;
+        _originalStartWithWindows = _startWithWindows;
         _minimizeToTray = state.MinimizeToTray;
         _autoConnectOnStartup = state.AutoConnectOnStartup;
         _autoMountOnStartup = state.AutoMountOnStartup;
@@ -44,7 +51,7 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         CancelCommand = new RelayCommand(() => RequestClose?.Invoke());
     }
 
-    public IReadOnlyList<string> ThemeOptions { get; } = new[] { "跟随系统", "浅色", "深色" };
+    public IReadOnlyList<string> ThemeOptions { get; } = new[] { "跟随系统", "浅色", "夜间模式" };
 
     public IReadOnlyList<int> ConcurrencyOptions { get; } = Enumerable.Range(1, 8).ToList();
 
@@ -108,23 +115,35 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         var preference = ThemeChoice switch
         {
             "浅色" => ThemeManager.Light,
-            "深色" => ThemeManager.Dark,
+            "夜间模式" => ThemeManager.Dark,
             _ => ThemeManager.System,
         };
-        ThemeManager.Apply(preference);
+        if (!global::System.Text.RegularExpressions.Regex.IsMatch(AccentColor ?? "", "^#[0-9a-fA-F]{6}$"))
+        {
+            MessageBox.Show("请输入有效颜色，例如 #1565C0，或使用颜色盘。", "主题颜色");
+            return;
+        }
+        var receive = ShareReceiveSettings.Load();
+        if (!string.Equals(receive.Folder, ReceiveFolder, StringComparison.OrdinalIgnoreCase))
+        {
+            try { Directory.CreateDirectory(ReceiveFolder); receive.Folder = ReceiveFolder; receive.Configured = true; receive.Save(); }
+            catch (Exception ex) { MessageBox.Show("保存接收目录失败：" + ex.Message); return; }
+        }
+        ThemeManager.Apply(preference, AccentColor);
 
         var state = _store.Load();
         state.Theme = preference;
+        state.AccentColor = ThemeManager.AccentColor;
         state.MinimizeToTray = MinimizeToTray;
         state.AutoConnectOnStartup = AutoConnectOnStartup;
         state.AutoMountOnStartup = AutoMountOnStartup;
         _store.Save(state);
 
         // 开机启动只写 HKCU，无需管理员权限
-        if (StartWithWindows && !StartupService.SetEnabled(true))
+        if (StartWithWindows != _originalStartWithWindows && StartWithWindows && !StartupService.SetEnabled(true))
             MessageBox.Show("开机启动注册失败，请检查当前用户注册表权限。",
                 "设置", MessageBoxButton.OK, MessageBoxImage.Warning);
-        else if (!StartWithWindows)
+        else if (StartWithWindows != _originalStartWithWindows && !StartWithWindows)
             StartupService.SetEnabled(false);
 
         _engine.MaxConcurrency = Concurrency;

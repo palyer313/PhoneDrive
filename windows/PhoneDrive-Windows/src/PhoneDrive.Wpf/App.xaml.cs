@@ -11,6 +11,7 @@ public partial class App : Application
     public static string DisplayVersion => typeof(App).Assembly
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "dev";
     private FileStream? _instanceLock;
+    private readonly CancellationTokenSource _activationStop = new();
     private static readonly string CrashLogPath = Path.Combine(PhoneDrive.Core.AppPaths.DataDirectory, "crash.log");
 
     public App()
@@ -43,19 +44,31 @@ public partial class App : Application
         }
         catch (IOException)
         {
-            StartupUri = null;
-            MessageBox.Show("PhoneDrive 已在运行，请从系统托盘打开已有窗口。", "PhoneDrive");
+            SingleInstanceActivation.Signal();
             Shutdown(); return;
         }
-        ThemeManager.Apply(new UiStateStore().Load().Theme);
+        var state = new UiStateStore().Load();
+        ThemeManager.Apply(state.Theme, state.AccentColor);
         PhoneDrive.Core.DiagnosticLog.Write("startup", $"PhoneDrive {DisplayVersion}; single instance; " + Environment.ProcessPath);
         base.OnStartup(e);
+        MainWindow = new MainWindow();
+        MainWindow.Show();
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemThemeChanged;
+        _ = SingleInstanceActivation.ListenAsync(Dispatcher, _activationStop.Token);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _activationStop.Cancel();
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemThemeChanged;
         _instanceLock?.Dispose();
         base.OnExit(e);
+    }
+
+    private void SystemThemeChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        if (ThemeManager.Current == ThemeManager.System && !Dispatcher.HasShutdownStarted)
+            Dispatcher.BeginInvoke(new Action(() => ThemeManager.Apply(ThemeManager.Current)));
     }
 
     internal static void WriteCrash(string category, Exception? ex)

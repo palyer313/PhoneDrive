@@ -56,6 +56,8 @@ class SftpServerService : Service() {
 
         val status = MutableStateFlow(Status())
         private val AUTHORIZED_BLOB = org.apache.sshd.common.AttributeRepository.AttributeKey<String>()
+        @Volatile var activeShareRoot: String? = null
+            private set
         @Volatile private var liveServer: SshServer? = null
         @Volatile private var liveService: SftpServerService? = null
         @JvmStatic fun noteTransferActivity() { liveService?.transferWake?.touch() }
@@ -193,6 +195,7 @@ class SftpServerService : Service() {
                 }
                 nsdAdvertiser = advertiser
 
+                activeShareRoot = sharedRoot.toFile().canonicalPath
                 status.value = Status(State.RUNNING, DEFAULT_PORT)
             } catch (e: Throwable) {
                 // 捕获 Error（如 ExceptionInInitializerError）：服务启动失败不应让整个 App 崩溃
@@ -219,6 +222,7 @@ class SftpServerService : Service() {
             // 若塞进 scope.launch 可能尚未调度就被取消，导致 2222 端口泄漏
             runCatching { server.stop(true) }
         }
+        activeShareRoot = null
         status.value = Status(State.STOPPED, DEFAULT_PORT)
     }
 }

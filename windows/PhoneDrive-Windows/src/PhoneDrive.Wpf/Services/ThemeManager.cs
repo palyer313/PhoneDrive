@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using System.Windows.Media;
 using System.Windows;
 
 namespace PhoneDrive.Wpf.Services;
@@ -12,10 +13,11 @@ public static class ThemeManager
     private const string PaletteLight = "Themes/Light.xaml";
     private const string PaletteDark = "Themes/Dark.xaml";
 
+    public static string AccentColor { get; private set; } = "#1565C0";
     public static string Current { get; private set; } = System;
 
     /// <summary>应用主题偏好：system / light / dark。system 跟随 Windows 应用主题。</summary>
-    public static void Apply(string? preference)
+    public static void Apply(string? preference, string? accent = null)
     {
         var pref = Normalize(preference);
         var dark = pref switch
@@ -26,6 +28,28 @@ public static class ThemeManager
         };
         SwapPalette(dark);
         Current = pref;
+        if (accent != null) AccentColor = NormalizeColor(accent);
+        var color = (Color)ColorConverter.ConvertFromString(AccentColor);
+        var resources = Application.Current.Resources;
+        resources["App.Accent"] = new SolidColorBrush(color);
+        resources["App.AccentHover"] = new SolidColorBrush(Mix(color, dark ? Colors.White : Colors.Black, 0.15));
+        resources["App.AccentText"] = new SolidColorBrush(Contrast(color));
+        resources["App.Hover"] = new SolidColorBrush(Mix(dark ? Color.FromRgb(30,34,40) : Colors.White, color, 0.12));
+        resources["App.Selection"] = new SolidColorBrush(Mix(dark ? Color.FromRgb(30,34,40) : Colors.White, color, 0.28));
+    }
+
+    public static string NormalizeColor(string? value) =>
+        value != null && global::System.Text.RegularExpressions.Regex.IsMatch(value, "^#[0-9a-fA-F]{6}$")
+            ? value.ToUpperInvariant() : "#1565C0";
+
+    private static Color Mix(Color a, Color b, double t) => Color.FromRgb(
+        (byte)(a.R + (b.R-a.R)*t), (byte)(a.G + (b.G-a.G)*t), (byte)(a.B + (b.B-a.B)*t));
+
+    private static Color Contrast(Color color)
+    {
+        static double Linear(byte value) { var c = value / 255.0; return c <= 0.04045 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4); }
+        var luminance = 0.2126*Linear(color.R) + 0.7152*Linear(color.G) + 0.0722*Linear(color.B);
+        return luminance > 0.179 ? Colors.Black : Colors.White;
     }
 
     public static string Normalize(string? preference) => preference?.ToLowerInvariant() switch

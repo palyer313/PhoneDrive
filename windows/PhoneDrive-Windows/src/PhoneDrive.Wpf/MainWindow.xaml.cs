@@ -128,7 +128,7 @@ public partial class MainWindow : Window
 
     private void OnNotification(string title, string message) => _tray?.ShowBalloon(title, message);
 
-    private void RestoreMainWindow()
+    internal void RestoreMainWindow()
     {
         Show();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;

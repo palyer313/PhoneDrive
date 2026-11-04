@@ -145,6 +145,8 @@ fun SettingsScreen(onAutoReconnectChanged: () -> Unit = {}) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            ThemeSettingsCard()
+
             // 服务状态
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -330,8 +332,13 @@ fun SettingsScreen(onAutoReconnectChanged: () -> Unit = {}) {
                     var root by remember { mutableStateOf(com.phonedrive.android.server.SharePolicy.prefs(context).getString("root", "") ?: "") }
                     var readOnly by remember { mutableStateOf(com.phonedrive.android.server.SharePolicy.readOnly(context, null)) }
                     var message by remember { mutableStateOf<String?>(null) }
-                    Text("填写共享存储内的目录，例如 Download、DCIM；留空共享存储根目录。目录修改后需停止并重新启动服务。", style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(value = root, onValueChange = { root = it }, label = { Text("共享子目录") }, modifier = Modifier.fillMaxWidth())
+                    var showFolderPicker by remember { mutableStateOf(false) }
+                    Text("选择要共享的文件夹。保存后重启文件服务生效，不会自动中断正在进行的传输。", style = MaterialTheme.typography.bodySmall)
+                    Text("已选目录：内部共享存储 / " + root.ifBlank { "（根目录）" })
+                    OutlinedButton(onClick = { showFolderPicker = true }) { Text("选择文件夹 / 新建文件夹") }
+                    if (showFolderPicker) ShareFolderPicker(root, { showFolderPicker = false }) {
+                        root = it; showFolderPicker = false; message = "目录已选择，点击保存共享范围后生效"
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("所有已授权设备只读", modifier = Modifier.weight(1f))
                         Switch(checked = readOnly, onCheckedChange = {

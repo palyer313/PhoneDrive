@@ -314,6 +314,17 @@
     <!-- Retain the WPF menu template: it owns submenu Popups and keyboard navigation. -->
     <Style TargetType="MenuItem">
         <Setter Property="Padding" Value="8,3"/>
+        <Style.Triggers>
+            <Trigger Property="Role" Value="TopLevelHeader">
+                <Setter Property="Foreground" Value="{DynamicResource App.Text}"/>
+            </Trigger>
+            <Trigger Property="Role" Value="TopLevelItem">
+                <Setter Property="Foreground" Value="{DynamicResource App.Text}"/>
+            </Trigger>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter Property="Foreground" Value="#17202A"/>
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <Style TargetType="ToolTip">
