@@ -1,9 +1,12 @@
 package com.phonedrive.android.remote
 
 import android.content.Context
+import com.phonedrive.android.AppDiagnostics
 import com.phonedrive.android.filemanager.ProviderHub
 import com.phonedrive.android.settings.AppSettings
+import com.phonedrive.android.transfer.TransferErrorClassifier
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -57,7 +60,19 @@ class ConnectionSupervisor(
         val lastError: String? = null,
     )
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val exceptionHandler = CoroutineExceptionHandler { _, error ->
+        AppDiagnostics.record(context, "connection-supervisor", error)
+        _links.update { map ->
+            map.mapValues { (_, state) ->
+                state.copy(
+                    connected = false,
+                    nextRetryInSeconds = -1,
+                    lastError = "连接协调器异常，已隔离该任务：${error.message ?: error.javaClass.simpleName}",
+                )
+            }
+        }
+    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
     private val directory = DeviceDirectory.getInstance(context)
 
     private val _links = MutableStateFlow<Map<String, LinkState>>(emptyMap())
@@ -86,25 +101,25 @@ class ConnectionSupervisor(
             discovery.peers.collect { list ->
                 peers.clear()
                 list.forEach { peers[it.deviceId] = it }
-                reconcile()
+                reconcileSafely()
             }
         }
         devicesJob = scope.launch {
-            directory.devices.collect { reconcile() }
+            directory.devices.collect { reconcileSafely() }
         }
         pollJob = scope.launch {
             while (isActive) {
                 delay(RECONCILE_INTERVAL_MS)
-                reconcile()
+                reconcileSafely()
             }
         }
-        scope.launch { reconcile() }
+        scope.launch { reconcileSafely() }
     }
 
     /** 设置页切换自动重连开关后调用，立即重新评估 */
     fun refresh() {
         if (!running) return
-        scope.launch { reconcile() }
+        scope.launch { reconcileSafely() }
     }
 
     fun stop() {
@@ -136,6 +151,17 @@ class ConnectionSupervisor(
     }
 
     // ---------------------------------------------------------------- 协调
+
+    private suspend fun reconcileSafely() {
+        try {
+            reconcile()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            // A disk write / discovery failure must not kill the collector or the poll loop.
+            AppDiagnostics.record(context, "reconcile", error)
+        }
+    }
 
     private suspend fun reconcile() {
         if (!running) return
@@ -288,6 +314,17 @@ class ConnectionSupervisor(
                     }
                 }
             }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            AppDiagnostics.record(context, "link-loop:$deviceId", error)
+            setState(deviceId) {
+                it.copy(
+                    connected = false,
+                    nextRetryInSeconds = -1,
+                    lastError = "自动连接异常：${error.message ?: error.javaClass.simpleName}",
+                )
+            }
         } finally {
             linkJobs.remove(deviceId)
             setState(deviceId) { it.copy(nextRetryInSeconds = -1) }
@@ -303,23 +340,7 @@ class ConnectionSupervisor(
         return minOf(delay, MAX_BACKOFF_MS)
     }
 
-    private fun isAuthFailure(error: Throwable): Boolean {
-        var current: Throwable? = error
-        var depth = 0
-        while (current != null && depth < 8) {
-            val name = current.javaClass.name
-            val message = current.message.orEmpty()
-            val auth = name.contains("AuthException", ignoreCase = true) ||
-                message.contains("Exhausted available authentication", ignoreCase = true) ||
-                message.contains("authentication", ignoreCase = true) ||
-                message.contains("USERAUTH", ignoreCase = true) ||
-                message.contains("publickey", ignoreCase = true)
-            if (auth) return true
-            current = current.cause
-            depth++
-        }
-        return false
-    }
+    private fun isAuthFailure(error: Throwable): Boolean = TransferErrorClassifier.isAuth(error)
 
     private fun setState(deviceId: String, transform: (LinkState) -> LinkState) {
         _links.update { map -> map + (deviceId to transform(map[deviceId] ?: LinkState())) }

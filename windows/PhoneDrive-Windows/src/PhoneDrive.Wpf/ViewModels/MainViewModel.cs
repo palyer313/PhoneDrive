@@ -708,15 +708,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Dispatch(() =>
         {
             if (task.State == TransferState.Done)
-                SetStatus($"传输完成: {FilePaths.FileName(task.SourcePath)}");
+            {
+                SetStatus(string.IsNullOrWhiteSpace(task.Warning)
+                    ? $"传输完成: {FilePaths.FileName(task.SourcePath)}"
+                    : $"传输完成（注意）: {FilePaths.FileName(task.SourcePath)} {task.Warning}".Trim());
+            }
+            else if (task.State == TransferState.Skipped)
+            {
+                SetStatus($"已跳过: {FilePaths.FileName(task.SourcePath)}");
+            }
             else
+            {
                 SetStatus($"传输{task.State}: {FilePaths.FileName(task.SourcePath)} {task.Error}".Trim());
+            }
 
             ScheduleRefresh(task.TargetKey);
 
             Notification?.Invoke(
-                task.State == TransferState.Done ? "传输完成" : $"传输{task.State}",
-                FilePaths.FileName(task.SourcePath));
+                task.State == TransferState.Done
+                    ? (string.IsNullOrWhiteSpace(task.Warning) ? "传输完成" : "传输完成，但有警告")
+                    : $"传输{task.State}",
+                string.IsNullOrWhiteSpace(task.Error)
+                    ? FilePaths.FileName(task.SourcePath)
+                    : $"{FilePaths.FileName(task.SourcePath)}: {task.Error}");
         });
     }
 

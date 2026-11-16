@@ -22,6 +22,7 @@ class PhoneDriveApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        installCrashLogging()
         ProviderHub.init(this)
         // 提前恢复未完成的传输任务（状态为已暂停，等待用户继续）
         TransferEngine.get(this)
@@ -32,6 +33,14 @@ class PhoneDriveApp : Application() {
         ).apply { description = getString(R.string.notification_channel_service_desc) }
         getSystemService(android.app.NotificationManager::class.java)
             .createNotificationChannel(channel)
+    }
+
+    private fun installCrashLogging() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            AppDiagnostics.record(this, "uncaught:${thread.name}", error)
+            previous?.uncaughtException(thread, error)
+        }
     }
 
     /**

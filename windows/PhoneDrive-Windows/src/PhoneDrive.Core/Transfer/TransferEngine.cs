@@ -7,7 +7,15 @@ using PhoneDrive.Core.Sftp;
 
 namespace PhoneDrive.Core.Transfer;
 
-public enum TransferState { Queued, Running, Paused, Verifying, Done, Failed, Canceled }
+public enum TransferState { Queued, Running, Paused, Verifying, Done, Failed, Canceled, Skipped }
+
+public enum ConflictPolicy { Ask, Overwrite, Skip, Rename, KeepBoth }
+
+public static class TransferStates
+{
+    public static bool IsTerminal(TransferState state) =>
+        state is TransferState.Done or TransferState.Failed or TransferState.Canceled or TransferState.Skipped;
+}
 
 /// <summary>
 /// 单个传输任务。任务自带源/目标 provider 引用，因此多设备并发时互不串用会话。
@@ -18,7 +26,7 @@ public sealed class TransferTask
     public required string TaskId { get; init; }
     public required string SourceDeviceId { get; init; }
     public required string SourcePath { get; init; }
-    public required string TargetPath { get; init; }
+    public required string TargetPath { get; set; }
 
     /// <summary>源 provider 稳定标识（持久化用）</summary>
     public string SourceKey { get; init; } = "";
@@ -31,8 +39,13 @@ public sealed class TransferTask
     public long ResumeOffset { get; set; }
     public TransferState State { get; set; } = TransferState.Queued;
     public string? Error { get; set; }
+    public TransferErrorKind? ErrorKind { get; set; }
+    /// <summary>Non-fatal user-visible warning. DONE may carry a warning, never an Error.</summary>
+    public string? Warning { get; set; }
     public string? Sha256 { get; set; }
     public bool OverwriteExisting { get; init; }
+    public ConflictPolicy ConflictPolicy { get; set; } = ConflictPolicy.Ask;
+    internal int AutoRetryCount { get; set; }
     public string? SourceSha256 { get; set; }
     public bool DeleteSourceAfterVerify { get; init; } // move 语义
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
@@ -174,7 +187,8 @@ public sealed class TransferEngine : IDisposable
     public string EnqueueCopy(
         IFileProvider source, string sourcePath,
         IFileProvider target, string targetPath,
-        long size, bool move = false, bool overwrite = false)
+        long size, bool move = false, bool overwrite = false,
+        ConflictPolicy? conflictPolicy = null)
     {
         RegisterProvider(source);
         RegisterProvider(target);
@@ -190,6 +204,7 @@ public sealed class TransferEngine : IDisposable
             Size = size,
             DeleteSourceAfterVerify = move,
             OverwriteExisting = overwrite,
+            ConflictPolicy = conflictPolicy ?? (overwrite ? ConflictPolicy.Overwrite : ConflictPolicy.Ask),
             SourceProvider = source,
             TargetProvider = target,
         };
@@ -246,7 +261,7 @@ public sealed class TransferEngine : IDisposable
                         continue;
                     }
 
-                    if (task.State is TransferState.Canceled or TransferState.Done or TransferState.Failed)
+                    if (TransferStates.IsTerminal(task.State))
                     {
                         _queued.TryRemove(task.TaskId, out _);
                         continue;
@@ -284,38 +299,75 @@ public sealed class TransferEngine : IDisposable
     {
         if (!_executing.TryAdd(task.TaskId, task)) return;
         _queued.TryRemove(task.TaskId, out _);
-        var tempPath = task.TargetPath + "." + task.TaskId + TempSuffix;
-        var gate = _destinationLocks.GetOrAdd(task.TargetKey + "|" + task.TargetPath, _ => new SemaphoreSlim(1, 1));
+        string? tempPath = null;
+        SemaphoreSlim? gate = null;
         var entered = false;
         task.Cancel = new CancellationTokenSource();
         var ct = task.Cancel.Token;
         try
         {
-            if (task.State is TransferState.Done or TransferState.Canceled or TransferState.Failed) return;
-            await gate.WaitAsync(ct).ConfigureAwait(false);
-            entered = true;
+            if (TransferStates.IsTerminal(task.State)) return;
+
             // Always rebind: reconnect may have replaced a disposed provider.
             var source = ResolveProvider(task.SourceKey) ?? task.SourceProvider
-                ?? throw new IOException("源设备未连接");
+                ?? throw new TransferException(TransferErrorKind.Network, "源设备未连接");
             var target = ResolveProvider(task.TargetKey) ?? task.TargetProvider
-                ?? throw new IOException("目标设备未连接");
+                ?? throw new TransferException(TransferErrorKind.Network, "目标设备未连接");
             task.SourceProvider = source;
             task.TargetProvider = target;
             if (source.Key == target.Key && task.SourcePath.Equals(task.TargetPath,
                     source.Capabilities.Semantics == FsSemantics.Local ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
-                throw new IOException("源和目标是同一个文件");
-            if (target.Exists(task.TargetPath) && !task.OverwriteExisting)
-                throw new IOException("目标已存在，已保留原文件。请选择其他名称或使用明确的覆盖操作。");
+                throw new TransferException(TransferErrorKind.Conflict, "源和目标是同一个文件");
+
             var sourceInfo = source.Stat(task.SourcePath) ?? throw new FileNotFoundException("源文件不存在");
-            if (sourceInfo.IsDirectory) throw new IOException("目录应按文件逐项加入队列");
+            if (sourceInfo.IsDirectory) throw new TransferException(TransferErrorKind.Conflict, "目录应按文件逐项加入队列");
             task.Size = sourceInfo.Size;
+
+            var policy = EffectiveConflictPolicy(task);
+            var resolved = ResolveConflict(target, task.TargetPath, policy);
+            if (resolved == null)
+            {
+                CompleteSkipped(task);
+                return;
+            }
+            task.TargetPath = resolved;
+            tempPath = task.TargetPath + "." + task.TaskId + TempSuffix;
+            gate = _destinationLocks.GetOrAdd(task.TargetKey + "|" + task.TargetPath, _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            entered = true;
+
+            // Recheck while holding this engine's destination gate; external writers are still
+            // guarded by FileCommit's final type/existence check.
+            var existing = target.Stat(task.TargetPath);
+            if (existing != null)
+            {
+                if (existing.IsDirectory)
+                    throw new TransferException(TransferErrorKind.Conflict,
+                        "类型冲突：目标是目录，已阻止用文件替换整个目录");
+                if (policy == ConflictPolicy.Skip)
+                {
+                    CompleteSkipped(task);
+                    return;
+                }
+                if (policy is ConflictPolicy.Rename or ConflictPolicy.KeepBoth)
+                    throw new TransferException(TransferErrorKind.Conflict, "目标冲突在传输前发生变化，请重试");
+                if (policy != ConflictPolicy.Overwrite)
+                    throw new TransferException(TransferErrorKind.Conflict,
+                        "目标已存在，已保留原文件。请选择其他名称或使用明确的覆盖操作。");
+            }
+
             task.State = TransferState.Verifying;
             task.Error = null;
+            task.ErrorKind = null;
+            task.Warning = null;
             task.FinishedAt = null;
             Notify(task);
             var expected = await HashAsync(source, task.SourcePath, ct, task).ConfigureAwait(false);
-            if (task.SourceSha256 != null && task.SourceSha256 != expected && target.Exists(tempPath))
-                target.Delete(tempPath);
+            if (task.SourceSha256 != null && task.SourceSha256 != expected)
+            {
+                if (target.Exists(tempPath)) target.Delete(tempPath);
+                task.Warning = "检测到源文件已变化，已放弃旧断点并从头重传";
+            }
             task.SourceSha256 = expected;
             var offset = target.Stat(tempPath)?.Size ?? 0;
             if (offset > task.Size || offset < 0) { target.Delete(tempPath); offset = 0; }
@@ -331,11 +383,10 @@ public sealed class TransferEngine : IDisposable
             Notify(task);
             if (offset < task.Size || !target.Exists(tempPath))
             {
-                using var input = source.OpenRead(task.SourcePath);
-                if (offset > 0) input.Seek(offset, SeekOrigin.Begin);
                 if (offset == 0 && source.Capabilities.Semantics == FsSemantics.Local &&
                     target is SftpFileProvider { SupportsPipelinedUpload: true } sftp)
                 {
+                    using var input = source.OpenRead(task.SourcePath);
                     long lastProgress = 0;
                     await sftp.UploadPipelinedAsync(input, tempPath, token => WaitControlAsync(task, token), bytes =>
                     {
@@ -351,51 +402,87 @@ public sealed class TransferEngine : IDisposable
                 }
                 else
                 {
-                await using var output = offset > 0 ? target.OpenAppend(tempPath) : target.OpenWrite(tempPath);
-                var buffer = new byte[ChunkSize];
-                long lastNotify = 0;
-                while (true)
-                {
-                    await WaitControlAsync(task, ct).ConfigureAwait(false);
-                    var read = await input.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false);
-                    if (read == 0) break;
-                    await output.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
-                    task.Transferred += read;
-                    if (Environment.TickCount64 - lastNotify > 400)
+                    using var input = source.OpenRead(task.SourcePath);
+                    if (offset > 0) input.Seek(offset, SeekOrigin.Begin);
+                    Stream output;
+                    if (offset == 0)
                     {
-                        lastNotify = Environment.TickCount64;
-                        task.Tracker.Sample(task.Transferred, task.Size, out var speed, out var eta);
-                        task.SpeedBytesPerSecond = speed; task.EtaSeconds = eta;
-                        Notify(task); PersistDebounced();
+                        output = target.OpenWrite(tempPath);
                     }
-                }
-                await output.FlushAsync(ct).ConfigureAwait(false);
+                    else
+                    {
+                        try
+                        {
+                            output = target.OpenAppend(tempPath);
+                        }
+                        catch (Exception appendError) when (appendError is NotSupportedException or IOException)
+                        {
+                            DiagnosticLog.Write("transfer-resume",
+                                "append unsupported; restarting from byte 0: " + appendError.Message);
+                            target.Delete(tempPath);
+                            offset = 0;
+                            task.ResumeOffset = task.Transferred = 0;
+                            task.Tracker.Reset(0);
+                            input.Seek(0, SeekOrigin.Begin);
+                            output = target.OpenWrite(tempPath);
+                        }
+                    }
+                    await using (output)
+                    {
+                        var buffer = new byte[ChunkSize];
+                        long lastNotify = 0;
+                        while (true)
+                        {
+                            await WaitControlAsync(task, ct).ConfigureAwait(false);
+                            var read = await input.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false);
+                            if (read == 0) break;
+                            await output.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+                            task.Transferred += read;
+                            if (Environment.TickCount64 - lastNotify > 400)
+                            {
+                                lastNotify = Environment.TickCount64;
+                                task.Tracker.Sample(task.Transferred, task.Size, out var speed, out var eta);
+                                task.SpeedBytesPerSecond = speed; task.EtaSeconds = eta;
+                                Notify(task); PersistDebounced();
+                            }
+                        }
+                        await output.FlushAsync(ct).ConfigureAwait(false);
+                    }
                 }
             }
             task.State = TransferState.Verifying;
             Notify(task);
             if (target.Stat(tempPath)?.Size != task.Size ||
                 await HashAsync(target, tempPath, ct, task).ConfigureAwait(false) != expected)
-                throw new IOException("目标临时文件 SHA-256 校验失败，源文件已保留");
+                throw new TransferException(TransferErrorKind.Integrity, "目标临时文件 SHA-256 校验失败，源文件已保留");
             if (await HashAsync(source, task.SourcePath, ct, task).ConfigureAwait(false) != expected)
-                throw new IOException("传输期间源文件发生变化，未提交且未删除源文件");
+                throw new TransferException(TransferErrorKind.Integrity, "传输期间源文件发生变化，未提交且未删除源文件");
             await WaitControlAsync(task, ct).ConfigureAwait(false);
-            await FileCommit.CommitAsync(target, tempPath, task.TargetPath, expected, task.OverwriteExisting, ct)
+            await FileCommit.CommitAsync(target, tempPath, task.TargetPath, expected,
+                    policy == ConflictPolicy.Overwrite, ct)
                 .ConfigureAwait(false);
             task.Sha256 = expected;
             // Commit validates the final target too. Never delete a changed source.
             if (task.DeleteSourceAfterVerify)
             {
                 if (await HashAsync(source, task.SourcePath, CancellationToken.None).ConfigureAwait(false) != expected)
-                    task.Error = "目标已验证，源文件已变化，已保留源文件";
-                else
+                    throw new TransferException(TransferErrorKind.Integrity,
+                        "目标已验证，但源文件已变化，已保留源文件");
+                try
                 {
-                    try { source.Delete(task.SourcePath, false); }
-                    catch (Exception ex) { task.Error = "目标已验证，但源删除失败：" + ex.Message; }
+                    source.Delete(task.SourcePath, false);
+                }
+                catch (Exception deleteError)
+                {
+                    throw new TransferException(TransferErrorKind.Unknown,
+                        "目标已验证，但源删除失败，已保留源文件：" + deleteError.Message, deleteError);
                 }
             }
             task.State = TransferState.Done;
+            task.Error = null;
+            task.ErrorKind = null;
             task.Transferred = task.Size;
+            task.AutoRetryCount = 0;
             task.SpeedBytesPerSecond = 0; task.EtaSeconds = 0;
             task.FinishedAt = DateTimeOffset.UtcNow;
             Complete(task);
@@ -409,6 +496,20 @@ public sealed class TransferEngine : IDisposable
         }
         catch (Exception ex)
         {
+            var kind = TransferErrorClassifier.Classify(ex);
+            task.ErrorKind = kind;
+            if (kind == TransferErrorKind.NoSpace) TryDeleteTemp(task, tempPath);
+            if (kind == TransferErrorKind.Network && task.AutoRetryCount < 5)
+            {
+                task.AutoRetryCount++;
+                task.State = TransferState.Queued;
+                task.Error = $"网络错误（{ex.Message}），将自动重试 {task.AutoRetryCount}/5";
+                task.FinishedAt = null;
+                Notify(task);
+                PersistDebounced(force: true);
+                ScheduleAutoRetry(task, task.AutoRetryCount);
+                return;
+            }
             task.State = TransferState.Failed;
             task.Error = ex.Message;
             task.FinishedAt = DateTimeOffset.UtcNow;
@@ -419,8 +520,68 @@ public sealed class TransferEngine : IDisposable
             task.SpeedBytesPerSecond = 0;
             task.Cancel?.Dispose(); task.Cancel = null;
             _executing.TryRemove(task.TaskId, out _);
-            if (entered) gate.Release();
+            if (entered) gate?.Release();
         }
+    }
+
+    private static ConflictPolicy EffectiveConflictPolicy(TransferTask task) =>
+        task.ConflictPolicy != ConflictPolicy.Ask
+            ? task.ConflictPolicy
+            : task.OverwriteExisting ? ConflictPolicy.Overwrite : ConflictPolicy.Ask;
+
+    private static string? ResolveConflict(IFileProvider target, string path, ConflictPolicy policy)
+    {
+        var existing = target.Stat(path);
+        if (existing == null) return path;
+        if (existing.IsDirectory)
+            throw new TransferException(TransferErrorKind.Conflict,
+                "类型冲突：目标是目录，已阻止用文件替换整个目录");
+        return policy switch
+        {
+            ConflictPolicy.Overwrite => path,
+            ConflictPolicy.Skip => null,
+            ConflictPolicy.Rename or ConflictPolicy.KeepBoth => UniqueTargetPath(target, path),
+            _ => throw new TransferException(TransferErrorKind.Conflict,
+                "目标已存在，需要用户明确选择覆盖、跳过、重命名或保留两份"),
+        };
+    }
+
+    private static string UniqueTargetPath(IFileProvider target, string path)
+    {
+        var parent = target.GetParentPath(path);
+        var name = path.Replace('\\', '/').Split('/')[^1];
+        var dot = name.LastIndexOf('.');
+        var stem = dot > 0 ? name[..dot] : name;
+        var extension = dot > 0 ? name[dot..] : "";
+        for (var index = 2; index < 1000; index++)
+        {
+            var candidate = target.CombinePath(parent, $"{stem} ({index}){extension}");
+            if (!target.Exists(candidate)) return candidate;
+        }
+        throw new TransferException(TransferErrorKind.Conflict, "同名文件过多，无法自动重命名：" + name);
+    }
+
+    private void CompleteSkipped(TransferTask task)
+    {
+        task.State = TransferState.Skipped;
+        task.Error = null;
+        task.ErrorKind = null;
+        task.SpeedBytesPerSecond = 0;
+        task.EtaSeconds = 0;
+        task.FinishedAt = DateTimeOffset.UtcNow;
+        Complete(task);
+    }
+
+    private void ScheduleAutoRetry(TransferTask task, int attempt)
+    {
+        var delayMs = Math.Min(30_000, 1_000 << Math.Min(attempt - 1, 5));
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(delayMs).ConfigureAwait(false);
+            if (task.State != TransferState.Queued || task.PauseRequested) return;
+            _queued.TryRemove(task.TaskId, out _);
+            EnqueueTask(task);
+        });
     }
 
     private async Task WaitControlAsync(TransferTask task, CancellationToken ct)
@@ -454,8 +615,9 @@ public sealed class TransferEngine : IDisposable
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 
-    private void TryDeleteTemp(TransferTask task, string tempPath)
+    private void TryDeleteTemp(TransferTask task, string? tempPath)
     {
+        if (tempPath == null) return;
         try
         {
             var target = task.TargetProvider;
@@ -527,7 +689,7 @@ public sealed class TransferEngine : IDisposable
     public void Cancel(string taskId)
     {
         if (!_tasks.TryGetValue(taskId, out var task)) return;
-        if (task.State is TransferState.Done or TransferState.Failed or TransferState.Canceled) return;
+        if (TransferStates.IsTerminal(task.State)) return;
 
         task.PauseRequested = false;
         if (_executing.ContainsKey(taskId))
@@ -544,7 +706,7 @@ public sealed class TransferEngine : IDisposable
     }
 
     /// <summary>失败重试：重新排队（断点续传仍有效）。</summary>
-    public bool Retry(string taskId)
+    public bool Retry(string taskId, ConflictPolicy? conflictPolicy = null)
     {
         if (!_tasks.TryGetValue(taskId, out var task)) return false;
         if (_executing.ContainsKey(taskId) || task.State is TransferState.Running or TransferState.Queued or TransferState.Verifying)
@@ -555,7 +717,11 @@ public sealed class TransferEngine : IDisposable
         _queued.TryRemove(task.TaskId, out _);
 
         task.PauseRequested = false;
+        if (conflictPolicy.HasValue) task.ConflictPolicy = conflictPolicy.Value;
         task.Error = null;
+        task.ErrorKind = null;
+        task.Warning = null;
+        task.AutoRetryCount = 0;
         task.Sha256 = null;
         task.ResumeOffset = 0;
         task.Transferred = 0;
@@ -575,15 +741,14 @@ public sealed class TransferEngine : IDisposable
         foreach (var task in _tasks.Values)
         {
             if (_executing.ContainsKey(task.TaskId)) continue;
-            if (task.State is TransferState.Done or TransferState.Failed or TransferState.Canceled)
+            if (TransferStates.IsTerminal(task.State))
             {
                 _tasks.TryRemove(task.TaskId, out _);
             }
         }
         lock (_sync)
         {
-            _historyOrder.RemoveAll(t => t.State is
-                TransferState.Done or TransferState.Failed or TransferState.Canceled);
+            _historyOrder.RemoveAll(t => TransferStates.IsTerminal(t.State));
             foreach (var key in _history.Keys.ToList())
                 _history.TryRemove(key, out _);
         }
@@ -631,9 +796,19 @@ public sealed class TransferEngine : IDisposable
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // 损坏的持久化文件不应阻断启动
+            // 损坏的持久化文件不应阻断启动；保留现场以便恢复或排查。
+            try
+            {
+                var preserved = _persistFile + ".corrupt-" + DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmss");
+                File.Copy(_persistFile, preserved, overwrite: false);
+                DiagnosticLog.Write("transfer-store", "transfers.json 损坏，已保留到 " + preserved + "；" + ex.Message);
+            }
+            catch (Exception preserveError)
+            {
+                DiagnosticLog.Write("transfer-store", "transfers.json 损坏且保留失败：" + preserveError.Message);
+            }
         }
     }
 

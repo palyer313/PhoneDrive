@@ -21,7 +21,7 @@ public sealed class AuditReproductionTests(ITestOutputHelper output)
         for (int i = 0; i < 400; i++)
         {
             var task = engine.GetTask(id)!;
-            if (task.State is TransferState.Done or TransferState.Failed or TransferState.Canceled) return task;
+            if (TransferStates.IsTerminal(task.State)) return task;
             await Task.Delay(25);
         }
         throw new TimeoutException();

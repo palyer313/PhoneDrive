@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.phonedrive.android.remote.DeviceDirectory
 import com.phonedrive.android.remote.PairedDevice
+import com.phonedrive.android.transfer.ConflictPolicy
 import com.phonedrive.android.transfer.TransferEngine
 import com.phonedrive.android.transfer.TransferState
 import com.phonedrive.android.transfer.TransferTask
@@ -82,6 +83,7 @@ fun TransfersScreen() {
                         devices = devices,
                         onPause = { engine.pause(task.taskId) },
                         onResume = { engine.resume(task.taskId) },
+                        onRetryAs = { policy -> engine.retry(task.taskId, policy) },
                         onCancel = { engine.cancel(task.taskId) },
                         onRemove = { engine.remove(task.taskId) },
                     )
@@ -97,6 +99,7 @@ private fun TransferCard(
     devices: List<PairedDevice>,
     onPause: () -> Unit,
     onResume: () -> Unit,
+    onRetryAs: (ConflictPolicy) -> Unit,
     onCancel: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -118,7 +121,11 @@ private fun TransferCard(
                     )
                 }
                 Text(
-                    stateLabel(task.state),
+                    if (task.state == TransferState.DONE && task.warning != null) {
+                        "完成（注意）"
+                    } else {
+                        stateLabel(task.state)
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = stateColor(task.state)
                 )
@@ -160,9 +167,17 @@ private fun TransferCard(
                 }
             }
 
+            if (task.warning != null) {
+                Text(
+                    task.warning,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+
             if (task.error != null) {
                 Text(
-                    task.error ?: "",
+                    task.error,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error
                 )
@@ -180,6 +195,13 @@ private fun TransferCard(
                     }
                     TransferState.FAILED -> {
                         TextButton(onClick = onResume) { Text("重试") }
+                        TextButton(onClick = { onRetryAs(ConflictPolicy.OVERWRITE) }) { Text("覆盖") }
+                        TextButton(onClick = { onRetryAs(ConflictPolicy.RENAME) }) { Text("重命名") }
+                        TextButton(onClick = onRemove) { Text("删除") }
+                    }
+                    TransferState.SKIPPED -> {
+                        TextButton(onClick = { onRetryAs(ConflictPolicy.OVERWRITE) }) { Text("覆盖") }
+                        TextButton(onClick = { onRetryAs(ConflictPolicy.RENAME) }) { Text("重命名") }
                         TextButton(onClick = onRemove) { Text("删除") }
                     }
                     else -> {

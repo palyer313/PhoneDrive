@@ -135,6 +135,8 @@
                         <Button Content="恢复" Command="{Binding Transfers.ResumeCommand}" Margin="0,0,4,0" Padding="8,3"/>
                         <Button Content="取消" Command="{Binding Transfers.CancelCommand}" Margin="0,0,4,0" Padding="8,3"/>
                         <Button Content="重试" Command="{Binding Transfers.RetryCommand}" Margin="0,0,4,0" Padding="8,3"/>
+                        <Button Content="重命名重试" Command="{Binding Transfers.RetryRenameCommand}" Margin="0,0,4,0" Padding="8,3"/>
+                        <Button Content="覆盖重试" Command="{Binding Transfers.RetryOverwriteCommand}" Margin="0,0,4,0" Padding="8,3"/>
                         <Button Content="清空已完成" Command="{Binding Transfers.ClearCompletedCommand}" Padding="8,3"/>
                     </StackPanel>
                 </DockPanel>

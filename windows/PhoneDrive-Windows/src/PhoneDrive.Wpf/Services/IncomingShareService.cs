@@ -104,7 +104,7 @@ public sealed class IncomingShareService(MainViewModel owner) : IDisposable
             {
                 _stop.Token.ThrowIfCancellationRequested();
                 task = owner.Engine.GetTask(taskId) ?? owner.Engine.History.FirstOrDefault(t => t.TaskId == taskId) ?? throw new IOException("传输任务丢失");
-                if (task.State is TransferState.Done or TransferState.Failed or TransferState.Canceled) break;
+                if (TransferStates.IsTerminal(task.State)) break;
                 await Task.Delay(400, _stop.Token);
             }
             if (task.State != TransferState.Done) throw new IOException(task.Error ?? "接收已取消，可在传输队列重试");

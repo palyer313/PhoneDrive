@@ -2,9 +2,11 @@ package com.phonedrive.android.transfer
 
 import android.content.Context
 import android.util.Log
+import com.phonedrive.android.AppDiagnostics
 import com.phonedrive.android.filemanager.FileProvider
 import com.phonedrive.android.filemanager.ProviderHub
 import com.phonedrive.android.settings.AppSettings
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -54,7 +56,11 @@ class TransferEngine private constructor(private val context: Context) {
     private class PauseSignal : Exception("paused")
     private class CancelSignal : Exception("canceled")
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, error ->
+            AppDiagnostics.record(context, "transfer-scope", error)
+        }
+    )
     private val store = TransferStore(context)
 
     private val _tasks = MutableStateFlow<List<TransferTask>>(emptyList())
@@ -65,6 +71,9 @@ class TransferEngine private constructor(private val context: Context) {
 
     private val controls = ConcurrentHashMap<String, Control>()
     private val runningJobs = ConcurrentHashMap<String, Job>()
+    private val retryAttempts = ConcurrentHashMap<String, Int>()
+    private val retryAfter = ConcurrentHashMap<String, Long>()
+    private val taskTemps = ConcurrentHashMap<String, MutableSet<String>>()
     private val dispatchChannel = Channel<Unit>(Channel.CONFLATED)
 
     @Volatile
@@ -143,11 +152,24 @@ class TransferEngine private constructor(private val context: Context) {
         }
     }
 
-    fun resume(taskId: String) {
+    fun resume(taskId: String, conflictPolicy: ConflictPolicy? = null) {
         val task = current(taskId) ?: return
-        if (task.state != TransferState.PAUSED && task.state != TransferState.FAILED) return
+        if (task.state != TransferState.PAUSED &&
+            task.state != TransferState.FAILED &&
+            task.state != TransferState.SKIPPED
+        ) return
+        retryAttempts.remove(taskId)
+        retryAfter.remove(taskId)
         replace(
-            task.copy(state = TransferState.QUEUED, error = null, speedBps = 0, etaSeconds = -1),
+            task.copy(
+                state = TransferState.QUEUED,
+                conflictPolicy = conflictPolicy ?: task.conflictPolicy,
+                error = null,
+                errorKind = null,
+                warning = null,
+                speedBps = 0,
+                etaSeconds = -1,
+            ),
             true
         )
         TransferService.start(context)
@@ -164,12 +186,15 @@ class TransferEngine private constructor(private val context: Context) {
         }
     }
 
-    fun retry(taskId: String) = resume(taskId)
+    fun retry(taskId: String, conflictPolicy: ConflictPolicy? = null) = resume(taskId, conflictPolicy)
 
     fun remove(taskId: String) {
         val task = current(taskId) ?: return
         if (!task.state.isTerminal) return
         _tasks.update { list -> list.filterNot { it.taskId == taskId } }
+        retryAttempts.remove(taskId)
+        retryAfter.remove(taskId)
+        taskTemps.remove(taskId)
         persist(force = true)
     }
 
@@ -195,7 +220,10 @@ class TransferEngine private constructor(private val context: Context) {
             it.state == TransferState.RUNNING || it.state == TransferState.VERIFYING
         }
         if (active >= concurrency) return false
-        val queued = _tasks.value.filter { it.state == TransferState.QUEUED }.sortedBy { it.createdAt }
+        val now = System.currentTimeMillis()
+        val queued = _tasks.value
+            .filter { it.state == TransferState.QUEUED && (retryAfter[it.taskId] ?: 0L) <= now }
+            .sortedBy { it.createdAt }
         var startedAny = false
         for (task in queued) {
             if (active >= concurrency) break
@@ -213,6 +241,8 @@ class TransferEngine private constructor(private val context: Context) {
             task.copy(
                 state = TransferState.RUNNING,
                 error = null,
+                errorKind = null,
+                warning = null,
                 speedBps = 0,
                 etaSeconds = -1
             )
@@ -229,7 +259,41 @@ class TransferEngine private constructor(private val context: Context) {
     // ---------------------------------------------------------------- 任务执行
 
     private suspend fun execute(taskId: String) {
-        val task = current(taskId) ?: return
+        var task = current(taskId) ?: return
+        try {
+            // Resolve the conflict before taking the destination lock, so the lock key is the
+            // final path rather than the user's original (possibly renamed-away) path.
+            val resuming = task.transferred > 0
+            val sameSourceAndTarget = task.srcDeviceId == task.dstDeviceId && task.srcPath == task.dstPath
+            if (!resuming && !sameSourceAndTarget) {
+                val dst = ProviderHub.providerFor(task.dstDeviceId)
+                val resolved = resolveTarget(dst, task.dstPath, task.conflictPolicy)
+                if (resolved == null) {
+                    replace(
+                        task.copy(
+                            state = TransferState.SKIPPED,
+                            error = null,
+                            errorKind = null,
+                            warning = "目标已存在，已按跳过策略保留原文件",
+                            speedBps = 0,
+                            etaSeconds = 0,
+                        ),
+                        true
+                    )
+                    return
+                }
+                if (resolved != task.dstPath) {
+                    task = task.copy(dstPath = resolved)
+                    replace(task)
+                }
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            finishFailed(taskId, error)
+            return
+        }
+
         val key = "${task.dstDeviceId}:${task.dstPath}"
         destinationLocks.getOrPut(key) { Mutex() }.withLock { executeLocked(taskId) }
     }
@@ -264,33 +328,60 @@ class TransferEngine private constructor(private val context: Context) {
             // 源与目标完全相同：直接跳过，避免覆盖策略误删源文件
             if (task.srcDeviceId == task.dstDeviceId && task.srcPath == task.dstPath) {
                 replace(
-                    task.copy(state = TransferState.SKIPPED, speedBps = 0, etaSeconds = 0),
+                    task.copy(
+                        state = TransferState.SKIPPED,
+                        error = null,
+                        errorKind = null,
+                        warning = "源与目标是同一路径，已跳过以避免自覆盖",
+                        speedBps = 0,
+                        etaSeconds = 0,
+                    ),
                     true
                 )
                 return
             }
 
-            // 断点恢复（已传过一部分）时不重走冲突重命名，目标沿用原路径，
-            // 否则目录任务会被整树复制到 "dirname (2)" 造成重复副本
+            // 断点恢复（已传过一部分）时目标沿用原路径；路径已在拿锁前解析完成。
             val resuming = task.transferred > 0
-            val resolved = if (resuming) task.dstPath
-            else resolveTarget(dst, task.dstPath, task.conflictPolicy)
-            if (resolved == null) {
-                replace(
-                    task.copy(state = TransferState.SKIPPED, speedBps = 0, etaSeconds = 0),
-                    true
-                )
-                return
-            }
+            val resolved = task.dstPath
             targetPath = resolved
-            if (resolved != task.dstPath) {
-                task = task.copy(dstPath = resolved)
-                replace(task)
+            if (!resuming && dst.exists(resolved)) {
+                if (dst.stat(resolved).isDirectory) {
+                    throw TransferException(
+                        TransferErrorKind.CONFLICT,
+                        "类型冲突：目标是目录，已阻止用文件替换整个目录",
+                    )
+                }
+                run {
+                    when (task.conflictPolicy) {
+                        ConflictPolicy.OVERWRITE -> Unit
+                        ConflictPolicy.SKIP -> {
+                            replace(
+                                task.copy(
+                                    state = TransferState.SKIPPED,
+                                    error = null,
+                                    errorKind = null,
+                                    warning = "目标已存在，已按跳过策略保留原文件",
+                                    speedBps = 0,
+                                    etaSeconds = 0,
+                                ),
+                                true
+                            )
+                            return
+                        }
+                        else -> throw TransferException(
+                            TransferErrorKind.CONFLICT,
+                            "目标在排队期间出现，请选择覆盖、跳过或重命名后重试",
+                        )
+                    }
+                }
             }
 
             // 源已变化：旧临时文件内容不可信，删除后从头传
             if (sourceChanged) {
-                runCatching { dst.delete(resolved + TMP_SUFFIX) }
+                cleanupTemp(dst, resolved, taskId)
+                task = task.copy(warning = "检测到源文件已变化，已放弃旧断点并从头重传")
+                replace(task)
             }
 
             // 同 provider 下把目录放入自身子树会造成无限自递归
@@ -298,7 +389,10 @@ class TransferEngine private constructor(private val context: Context) {
                 val srcNorm = task.srcPath.trimEnd('/')
                 val dstNorm = resolved.trimEnd('/')
                 if (dstNorm.startsWith("$srcNorm/")) {
-                    throw IOException("不能把目录复制到其自身内部：$resolved")
+                    throw TransferException(
+                        TransferErrorKind.CONFLICT,
+                        "不能把目录复制到其自身内部：$resolved",
+                    )
                 }
             }
 
@@ -314,6 +408,9 @@ class TransferEngine private constructor(private val context: Context) {
                 replace(
                     task.copy(
                         state = TransferState.DONE,
+                        error = null,
+                        errorKind = null,
+                        warning = null,
                         transferred = total,
                         resumeOffset = total,
                         speedBps = 0,
@@ -321,6 +418,7 @@ class TransferEngine private constructor(private val context: Context) {
                     ),
                     true
                 )
+                retryAttempts.remove(taskId)
                 return
             }
 
@@ -350,17 +448,29 @@ class TransferEngine private constructor(private val context: Context) {
                         checkControl(taskId)
                         if (hashFile(src, file.source, taskId) != file.hash)
                             throw IOException("源文件已变化，未删除：${file.source}")
-                        if (!src.delete(file.source)) throw IOException("目标已验证，但源文件删除失败：${file.source}")
+                    }
+                    TwoPhaseSourceDeleter.delete(src, verified.map { it.source }, taskId) {
+                        checkControl(taskId)
                     }
                     if (srcEntry.isDirectory) removeEmptyTree(src, task.srcPath, 0)
                 }
             }
-            replace((current(taskId) ?: task).copy(
+            val previous = current(taskId) ?: task
+            val finalWarning = listOfNotNull(previous.warning, warning)
+                .distinct()
+                .joinToString("；")
+                .ifBlank { null }
+            replace(previous.copy(
                 state = TransferState.DONE,
                 transferred = if (complete) total else tracker.transferred,
                 resumeOffset = if (complete) total else tracker.transferred,
-                speedBps = 0, etaSeconds = 0, error = warning,
+                speedBps = 0,
+                etaSeconds = 0,
+                error = null,
+                errorKind = null,
+                warning = finalWarning,
             ), true)
+            retryAttempts.remove(taskId)
         } catch (pause: PauseSignal) {
             val snapshot = current(taskId)
             if (snapshot != null) {
@@ -375,7 +485,7 @@ class TransferEngine private constructor(private val context: Context) {
                 )
             }
         } catch (cancel: CancelSignal) {
-            cleanupTemp(dstProvider, targetPath, taskId)
+            cleanupTaskTemps(taskId, dstProvider)
             val snapshot = current(taskId)
             if (snapshot != null) {
                 replace(
@@ -387,26 +497,71 @@ class TransferEngine private constructor(private val context: Context) {
             throw cancellation
         } catch (e: Exception) {
             Log.e(TAG, "task $taskId failed", e)
-            val snapshot = current(taskId)
-            if (snapshot != null) {
-                replace(
-                    snapshot.copy(
-                        state = TransferState.FAILED,
-                        error = e.message ?: e.javaClass.simpleName,
-                        speedBps = 0,
-                        etaSeconds = -1,
-                    ),
-                    true
-                )
+            val kind = TransferErrorClassifier.classify(e)
+            if (kind == TransferErrorKind.NO_SPACE) {
+                cleanupTaskTemps(taskId, dstProvider)
+                finishFailed(taskId, e, kind)
+                return
             }
+            val attempt = (retryAttempts[taskId] ?: 0)
+            if (kind == TransferErrorKind.NETWORK && attempt < 5) {
+                val nextAttempt = attempt + 1
+                retryAttempts[taskId] = nextAttempt
+                val delayMs = minOf(30_000L, 1_000L shl (nextAttempt - 1))
+                retryAfter[taskId] = System.currentTimeMillis() + delayMs
+                val snapshot = current(taskId)
+                if (snapshot != null) {
+                    replace(
+                        snapshot.copy(
+                            state = TransferState.QUEUED,
+                            error = "网络错误，将自动重试 $nextAttempt/5：${e.message ?: e.javaClass.simpleName}",
+                            errorKind = kind,
+                            speedBps = 0,
+                            etaSeconds = -1,
+                        ),
+                        true
+                    )
+                }
+                scope.launch {
+                    delay(delayMs)
+                    retryAfter.remove(taskId)
+                    if (current(taskId)?.state == TransferState.QUEUED) requestDispatch()
+                }
+                return
+            }
+            finishFailed(taskId, e, kind)
         } finally {
             snapshotProgress(taskId)
         }
     }
 
+    private fun finishFailed(taskId: String, error: Throwable, kind: TransferErrorKind? = null) {
+        val snapshot = current(taskId) ?: return
+        val resolvedKind = kind ?: TransferErrorClassifier.classify(error)
+        retryAfter.remove(taskId)
+        replace(
+            snapshot.copy(
+                state = TransferState.FAILED,
+                error = error.message ?: error.javaClass.simpleName,
+                errorKind = resolvedKind,
+                speedBps = 0,
+                etaSeconds = -1,
+            ),
+            true
+        )
+    }
+
     private fun cleanupTemp(dst: FileProvider?, targetPath: String?, taskId: String) {
         if (dst == null || targetPath == null) return
-        runCatching { dst.delete(targetPath + "." + taskId + TMP_SUFFIX) }
+        val tempPath = targetPath + "." + taskId + TMP_SUFFIX
+        runCatching { dst.delete(tempPath) }
+        taskTemps[taskId]?.remove(tempPath)
+    }
+
+    private fun cleanupTaskTemps(taskId: String, dst: FileProvider?) {
+        val paths = taskTemps.remove(taskId) ?: return
+        if (dst == null) return
+        paths.forEach { path -> runCatching { dst.delete(path) } }
     }
 
     private fun hashFile(provider: FileProvider, path: String, taskId: String, limit: Long? = null): String {
@@ -430,55 +585,100 @@ class TransferEngine private constructor(private val context: Context) {
         dstPath: String, total: Long, tracker: ProgressTracker,
     ): String {
         val tmpPath = "$dstPath.$taskId$TMP_SUFFIX"
+        taskTemps.getOrPut(taskId) { ConcurrentHashMap.newKeySet() }.add(tmpPath)
         val expected = hashFile(src, srcPath, taskId)
         val existing = runCatching { dst.stat(tmpPath).size }.getOrDefault(0L)
         var offset = if (existing in 0..total) existing else 0L
-        if (existing > total || (offset > 0 && hashFile(src, srcPath, taskId, offset) != hashFile(dst, tmpPath, taskId, offset))) {
+        if (existing > total ||
+            (offset > 0 && hashFile(src, srcPath, taskId, offset) != hashFile(dst, tmpPath, taskId, offset))
+        ) {
             if (!dst.delete(tmpPath)) throw IOException("旧临时文件无法重置")
             offset = 0
         }
         tracker.add(offset, silent = true)
         if (offset < total || !dst.exists(tmpPath)) {
-            src.openRead(srcPath, offset).use { input ->
-                dst.openWrite(tmpPath, append = offset > 0).use { output ->
+            var input = src.openRead(srcPath, offset)
+            val output = try {
+                dst.openWrite(tmpPath, append = offset > 0)
+            } catch (appendError: Exception) {
+                input.close()
+                if (offset == 0L) throw appendError
+                // Some SFTP servers reject append. Discard the prefix and retry from byte zero.
+                AppDiagnostics.write(
+                    context,
+                    "transfer-resume",
+                    "append unsupported; restarting ${srcPath}: ${appendError.message ?: appendError.javaClass.simpleName}",
+                )
+                if (!dst.delete(tmpPath)) {
+                    throw IOException("追加写入不受支持，且旧临时文件无法重置", appendError)
+                }
+                offset = 0L
+                tracker.reset(0L)
+                input = src.openRead(srcPath, 0L)
+                dst.openWrite(tmpPath, append = false)
+            }
+            input.use { source ->
+                output.use { target ->
                     val buffer = ByteArray(CHUNK_SIZE)
                     while (true) {
                         checkControl(taskId)
-                        val count = input.read(buffer)
+                        val count = source.read(buffer)
                         if (count <= 0) break
-                        output.write(buffer, 0, count); tracker.add(count.toLong())
+                        target.write(buffer, 0, count)
+                        tracker.add(count.toLong())
                     }
-                    output.flush()
+                    target.flush()
                 }
             }
         }
         if (dst.stat(tmpPath).size != total || hashFile(dst, tmpPath, taskId) != expected)
-            throw IOException("目标临时文件 SHA-256 校验失败，源文件已保留")
-        if (hashFile(src, srcPath, taskId) != expected) throw IOException("传输期间源文件发生变化")
+            throw TransferException(TransferErrorKind.INTEGRITY, "目标临时文件 SHA-256 校验失败，源文件已保留")
+        if (hashFile(src, srcPath, taskId) != expected)
+            throw TransferException(TransferErrorKind.INTEGRITY, "传输期间源文件发生变化")
         checkControl(taskId)
-        val backup = "$dstPath.phonedrive-backup-${UUID.randomUUID()}"
+        val backup = "$dstPath.phonedrive-backup-${System.currentTimeMillis()}-${UUID.randomUUID().toString().take(8)}"
         var backedUp = false
         var committed = false
         try {
             if (dst.exists(dstPath)) {
+                if (dst.stat(dstPath).isDirectory) {
+                    throw TransferException(
+                        TransferErrorKind.CONFLICT,
+                        "类型冲突：目标是目录，已阻止用文件替换整个目录",
+                    )
+                }
                 val policy = current(taskId)?.conflictPolicy
-                if (policy != ConflictPolicy.OVERWRITE) throw IOException("传输期间目标已出现，未覆盖")
-                if (!dst.rename(dstPath, backup)) throw IOException("无法保护旧目标，未覆盖")
+                if (policy != ConflictPolicy.OVERWRITE) {
+                    throw TransferException(TransferErrorKind.CONFLICT, "传输期间目标已出现，未覆盖")
+                }
+                if (!dst.rename(dstPath, backup)) {
+                    throw IOException("无法保护旧目标，未覆盖")
+                }
                 backedUp = true
+                AppDiagnostics.write(context, "file-commit", "backup created: $backup")
             }
             if (!dst.rename(tmpPath, dstPath)) throw IOException("提交失败")
             committed = true
-            if (hashFile(dst, dstPath, taskId) != expected) throw IOException("提交后目标 SHA-256 不一致")
+            if (hashFile(dst, dstPath, taskId) != expected)
+                throw TransferException(TransferErrorKind.INTEGRITY, "提交后目标 SHA-256 不一致")
         } catch (error: Exception) {
             try {
                 if (committed && !dst.delete(dstPath)) throw IOException("无法移除失败的提交")
                 if (backedUp && !dst.rename(backup, dstPath)) throw IOException("旧目标自动恢复失败")
             } catch (restore: Exception) {
+                AppDiagnostics.write(
+                    context,
+                    "file-commit",
+                    "restore failed; backup retained at $backup: ${restore.message ?: restore.javaClass.simpleName}",
+                )
                 throw IOException("提交失败，旧目标备份保留于 $backup：${restore.message}", error)
             }
             throw error
         }
-        if (backedUp) runCatching { dst.delete(backup) }
+        if (backedUp && !dst.delete(backup)) {
+            AppDiagnostics.write(context, "file-commit", "verified commit left backup at $backup")
+        }
+        taskTemps[taskId]?.remove(tmpPath)
         return expected
     }
 
@@ -489,7 +689,16 @@ class TransferEngine private constructor(private val context: Context) {
     ): Boolean {
         if (depth > 64) throw IOException("目录层级过深：$srcDir")
         checkControl(taskId)
-        if (!dst.exists(dstDir) && !dst.mkdir(dstDir)) throw IOException("创建目录失败：$dstDir")
+        if (dst.exists(dstDir)) {
+            if (!dst.stat(dstDir).isDirectory) {
+                throw TransferException(
+                    TransferErrorKind.CONFLICT,
+                    "类型冲突：目标同名项不是目录，不能用目录覆盖：$dstDir",
+                )
+            }
+        } else if (!dst.mkdir(dstDir)) {
+            throw IOException("创建目录失败：$dstDir")
+        }
         var complete = true
         for (child in src.list(srcDir)) {
             checkControl(taskId)
@@ -500,14 +709,37 @@ class TransferEngine private constructor(private val context: Context) {
                 continue
             }
             if (dst.exists(target)) {
-                val matches = runCatching { dst.stat(target).size == child.size &&
-                    hashFile(src, child.path, taskId) == hashFile(dst, target, taskId) }.getOrDefault(false)
+                val targetIsDirectory = dst.stat(target).isDirectory
+                val matches = !targetIsDirectory && runCatching {
+                    dst.stat(target).size == child.size &&
+                        hashFile(src, child.path, taskId) == hashFile(dst, target, taskId)
+                }.getOrDefault(false)
                 if (matches && (resuming || policy == ConflictPolicy.SKIP)) {
                     verified.add(VerifiedFile(child.path, target, hashFile(src, child.path, taskId)))
-                    tracker.add(child.size, silent = true); continue
+                    tracker.add(child.size, silent = true)
+                    continue
                 }
-                if (policy == ConflictPolicy.SKIP) { complete = false; continue }
-                if (policy != ConflictPolicy.OVERWRITE) target = uniquePath(dst, target)
+                when (policy) {
+                    ConflictPolicy.SKIP -> {
+                        complete = false
+                        continue
+                    }
+                    ConflictPolicy.OVERWRITE -> {
+                        if (targetIsDirectory) {
+                            throw TransferException(
+                                TransferErrorKind.CONFLICT,
+                                "类型冲突：目标同名项是目录，不能用文件替换：$target",
+                            )
+                        }
+                    }
+                    ConflictPolicy.RENAME, ConflictPolicy.KEEP_BOTH -> {
+                        target = uniquePath(dst, target)
+                    }
+                    ConflictPolicy.ASK -> throw TransferException(
+                        TransferErrorKind.CONFLICT,
+                        "目标目录中存在同名项，需要用户先选择处理策略：$target",
+                    )
+                }
             }
             val hash = copyFileData(taskId, src, child.path, dst, target, child.size, tracker)
             verified.add(VerifiedFile(child.path, target, hash))
@@ -556,7 +788,11 @@ class TransferEngine private constructor(private val context: Context) {
         return when (policy) {
             ConflictPolicy.SKIP -> null
             ConflictPolicy.OVERWRITE -> path
-            else -> uniquePath(dst, path)
+            ConflictPolicy.RENAME, ConflictPolicy.KEEP_BOTH -> uniquePath(dst, path)
+            ConflictPolicy.ASK -> throw TransferException(
+                TransferErrorKind.CONFLICT,
+                "目标已存在，需要用户明确选择覆盖、跳过、重命名或保留两份",
+            )
         }
     }
 
@@ -645,6 +881,13 @@ class TransferEngine private constructor(private val context: Context) {
         private var windowStart = System.currentTimeMillis()
         private var windowBytes = start
         private var lastUpdate = 0L
+
+        fun reset(value: Long) {
+            transferred = value
+            windowBytes = value
+            windowStart = System.currentTimeMillis()
+            lastUpdate = 0L
+        }
 
         fun add(delta: Long, silent: Boolean = false) {
             transferred += delta

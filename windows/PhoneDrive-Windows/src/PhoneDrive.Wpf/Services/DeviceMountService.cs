@@ -59,9 +59,9 @@ public sealed class DeviceMountService : IDisposable
             DriveMountService.PinHostKey(
                 session.Host, session.Port, session.VerifiedHostKeyName, session.VerifiedHostKeyBase64);
 
-            var keyPath = PhoneDrive.Core.Security.MountIdentity.CreateKeyFile(_connections.ClientKey);
+            var keyMaterial = PhoneDrive.Core.Security.MountIdentity.CreateKeyMaterial(_connections.ClientKey);
             device.MountLetter = normalized;
-            var result = await _driver.MountAsync(device, session.Host, session.Port, keyPath, ct).ConfigureAwait(false);
+            var result = await _driver.MountAsync(device, session.Host, session.Port, keyMaterial, ct).ConfigureAwait(false);
             return new MountOutcome(result.Success, result.Message);
         }
         catch (Exception ex)

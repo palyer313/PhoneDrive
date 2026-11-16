@@ -17,7 +17,7 @@ public sealed class TransferEngineTests
         while (DateTime.UtcNow < deadline)
         {
             var task = engine.GetTask(taskId);
-            if (task != null && task.State is TransferState.Done or TransferState.Failed or TransferState.Canceled)
+            if (task != null && TransferStates.IsTerminal(task.State))
                 return;
             await Task.Delay(50);
         }

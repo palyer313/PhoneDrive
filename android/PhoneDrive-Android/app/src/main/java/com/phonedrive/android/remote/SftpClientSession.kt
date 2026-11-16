@@ -6,6 +6,8 @@ import org.apache.sshd.client.keyverifier.ServerKeyVerifier
 import org.apache.sshd.client.session.ClientSession
 import org.apache.sshd.sftp.client.SftpClient
 import org.apache.sshd.sftp.client.SftpClientFactory
+import org.apache.sshd.sftp.common.SftpConstants
+import org.apache.sshd.sftp.common.SftpException
 import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
@@ -150,7 +152,12 @@ class SftpClientSession(private val device: PairedDevice) : Closeable {
 
     fun getFileInfo(path: String): SftpFileInfo? {
         val normalized = normalize(path)
-        val attrs = runCatching { requireSftp().lstat(normalized) }.getOrNull() ?: return null
+        val attrs = try {
+            requireSftp().lstat(normalized)
+        } catch (error: SftpException) {
+            if (error.status == SftpConstants.SSH_FX_NO_SUCH_FILE) return null
+            throw error
+        }
         return SftpFileInfo(
             name = normalized.substringAfterLast('/').ifBlank { "/" },
             path = normalized,

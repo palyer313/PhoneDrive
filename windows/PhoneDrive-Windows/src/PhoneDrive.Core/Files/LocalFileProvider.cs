@@ -56,16 +56,26 @@ public sealed class LocalFileProvider : IFileProvider
     {
         try
         {
-            if (Directory.Exists(path))
-                return ToEntry(new DirectoryInfo(path), path);
-            if (File.Exists(path))
-                return ToEntry(new FileInfo(path), path);
+            var directory = new DirectoryInfo(path);
+            if (directory.Exists)
+                return ToEntry(directory, path);
+
+            var file = new FileInfo(path);
+            var attributes = file.Attributes;
+            // .NET returns FileAttributes(-1) for a missing path instead of throwing.
+            if ((int)attributes == -1) return null;
+            return ToEntry(file, path);
         }
-        catch
+        catch (FileNotFoundException)
         {
-            // 无访问权限等异常视为不存在
+            return null;
         }
-        return null;
+        catch (DirectoryNotFoundException)
+        {
+            return null;
+        }
+        // UnauthorizedAccessException and other IO failures must remain distinguishable
+        // from "not found"; callers need them to report the right failure category.
     }
 
     public Stream OpenRead(string path) => new FileStream(

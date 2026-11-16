@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 
 /**
  * 已配对设备记录。
@@ -113,10 +115,16 @@ class DeviceDirectory private constructor(context: Context) {
 
         internal fun atomicWrite(target: File, content: String) {
             val tmp = File(target.parentFile, target.name + ".tmp")
-            tmp.writeText(content)
+            FileOutputStream(tmp, false).use { stream ->
+                val writer = stream.writer()
+                writer.write(content)
+                writer.flush()
+                stream.fd.sync()
+            }
+            // Same-directory rename is atomic on the app's private filesystem. Never fall back
+            // to direct overwrite: that would expose truncated JSON / authorized_keys to readers.
             if (!tmp.renameTo(target)) {
-                target.writeText(content)
-                tmp.delete()
+                throw IOException("原子写入失败，原文件已保留：${target.name}")
             }
         }
     }

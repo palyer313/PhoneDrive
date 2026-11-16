@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using PhoneDrive.Core.Models;
+using PhoneDrive.Core.Security;
 
 namespace PhoneDrive.Core.Mount;
 
@@ -61,7 +62,7 @@ public sealed class DriveMountService : IDisposable
     private static readonly object PinLock = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, MountedProcess> _owned = new();
     private readonly SemaphoreSlim _mountGate = new(1, 1);
-    private sealed record MountedProcess(Process Process, string KeyPath);
+    private sealed record MountedProcess(Process Process, MountKeyMaterial? Material, string? LegacyKeyPath);
     public static string KnownHostsPath => Path.Combine(AppPaths.DataDirectory, "ssh", "known_hosts");
 
     public static void PinHostKey(string host, int port, string keyType, string base64Blob)
@@ -121,7 +122,8 @@ public sealed class DriveMountService : IDisposable
             "-o", "ConnectTimeout=8",
             "-o", "ServerAliveInterval=10",
             "-o", "ServerAliveCountMax=2",
-            "-o", "reconnect",
+            // No automatic reconnect: the plaintext identity is removed once mounted.
+            // ConnectionSupervisor owns remounting and will create a fresh short-lived key.
             "-o", "idmap=user",
         }) psi.ArgumentList.Add(argument);
         if (Environment.GetEnvironmentVariable("PHONEDRIVE_MOUNT_DIAGNOSTICS") == "1")
@@ -129,8 +131,16 @@ public sealed class DriveMountService : IDisposable
         return psi;
     }
 
-    public async Task<MountResult> MountAsync(PairedDevice device, string host, int port,
-        string privateKeyPathForSshfs, CancellationToken ct = default)
+    public Task<MountResult> MountAsync(PairedDevice device, string host, int port,
+        string privateKeyPathForSshfs, CancellationToken ct = default) =>
+        MountCoreAsync(device, host, port, privateKeyPathForSshfs, material: null, ct);
+
+    public Task<MountResult> MountAsync(PairedDevice device, string host, int port,
+        MountKeyMaterial keyMaterial, CancellationToken ct = default) =>
+        MountCoreAsync(device, host, port, keyMaterial.TemporaryPath, keyMaterial, ct);
+
+    private async Task<MountResult> MountCoreAsync(PairedDevice device, string host, int port,
+        string privateKeyPathForSshfs, MountKeyMaterial? material, CancellationToken ct)
     {
         await _mountGate.WaitAsync(ct).ConfigureAwait(false);
         Process? process = null;
@@ -162,7 +172,10 @@ public sealed class DriveMountService : IDisposable
                 }
                 if (DriveInfo.GetDrives().Any(d => d.Name.StartsWith(letter + ":", StringComparison.OrdinalIgnoreCase)))
                 {
-                    _owned[letter] = new(process, privateKeyPathForSshfs);
+                    // sshfs has already read the identity. Remove plaintext immediately; the DPAPI
+                    // ciphertext (if any) remains only until unmount.
+                    material?.DeleteTemporary();
+                    _owned[letter] = new(process, material, material == null ? privateKeyPathForSshfs : null);
                     SaveOwnership();
                     success = true;
                     DiagnosticLog.Write("mount-ready", $"{device.DeviceId} {letter}:");
@@ -177,7 +190,12 @@ public sealed class DriveMountService : IDisposable
         catch (Exception ex) { return new(false, "挂载失败：" + ex.Message); }
         finally
         {
-            if (!success) { StopOwnedProcess(process); DeleteOwnedKey(privateKeyPathForSshfs); }
+            if (!success)
+            {
+                StopOwnedProcess(process);
+                if (material != null) material.DeleteAll();
+                else DeleteOwnedKey(privateKeyPathForSshfs);
+            }
             _mountGate.Release();
         }
     }
@@ -187,7 +205,8 @@ public sealed class DriveMountService : IDisposable
         var letter = driveLetter.TrimEnd(':').ToUpperInvariant();
         if (!_owned.TryRemove(letter, out var owned)) return Task.FromResult(new MountResult(false, "此盘符不属于本次 PhoneDrive 会话，未操作其他挂载"));
         StopOwnedProcess(owned.Process);
-        DeleteOwnedKey(owned.KeyPath);
+        if (owned.Material != null) owned.Material.DeleteAll();
+        else if (owned.LegacyKeyPath != null) DeleteOwnedKey(owned.LegacyKeyPath);
         SaveOwnership();
         return Task.FromResult(new MountResult(true, $"{letter}: 已卸载"));
     }

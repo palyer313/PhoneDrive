@@ -50,6 +50,7 @@ public partial class App : Application
         var state = new UiStateStore().Load();
         ThemeManager.Apply(state.Theme, state.AccentColor);
         PhoneDrive.Core.DiagnosticLog.Write("startup", $"PhoneDrive {DisplayVersion}; single instance; " + Environment.ProcessPath);
+        PhoneDrive.Core.Security.MountIdentity.CleanupStaleTemporaryKeys();
         base.OnStartup(e);
         MainWindow = new MainWindow();
         MainWindow.Show();

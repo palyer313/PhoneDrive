@@ -14,7 +14,7 @@ enum class TransferState {
 }
 
 enum class ConflictPolicy {
-    /** 引擎侧禁止静默覆盖，ASK 等价于自动重命名（UI 必须提前询问用户） */
+    /** 需要用户明确选择；引擎遇到冲突时失败，不会静默覆盖或改名。 */
     ASK, OVERWRITE, SKIP, RENAME, KEEP_BOTH
 }
 
@@ -33,6 +33,9 @@ data class TransferTask(
     val transferred: Long = 0L,
     val state: TransferState = TransferState.QUEUED,
     val error: String? = null,
+    val errorKind: TransferErrorKind? = null,
+    /** Non-fatal user-visible warning. DONE may carry a warning, never an Error. */
+    val warning: String? = null,
     val resumeOffset: Long = 0L,
     val conflictPolicy: ConflictPolicy = ConflictPolicy.ASK,
     val srcIsDirectory: Boolean = false,
@@ -66,6 +69,8 @@ data class TransferTask(
         put("transferred", transferred)
         put("state", state.name)
         put("error", error ?: "")
+        put("errorKind", errorKind?.name ?: "")
+        put("warning", warning ?: "")
         put("resumeOffset", resumeOffset)
         put("conflictPolicy", conflictPolicy.name)
         put("srcIsDirectory", srcIsDirectory)
@@ -80,6 +85,16 @@ data class TransferTask(
             val srcPath = obj.optString("srcPath")
             val dstPath = obj.optString("dstPath")
             if (srcPath.isBlank() || dstPath.isBlank()) return null
+            val restoredState = runCatching {
+                TransferState.valueOf(obj.optString("state", "PAUSED"))
+            }.getOrDefault(TransferState.PAUSED)
+            val restoredError = obj.optString("error").ifBlank { null }
+            // Older builds could persist DONE with a deletion warning in error.
+            val safeState = if (restoredState == TransferState.DONE && restoredError != null) {
+                TransferState.FAILED
+            } else {
+                restoredState
+            }
             return TransferTask(
                 taskId = taskId,
                 type = runCatching { TransferType.valueOf(obj.optString("type", "COPY")) }
@@ -90,9 +105,12 @@ data class TransferTask(
                 dstPath = dstPath,
                 size = obj.optLong("size"),
                 transferred = obj.optLong("transferred"),
-                state = runCatching { TransferState.valueOf(obj.optString("state", "PAUSED")) }
-                    .getOrDefault(TransferState.PAUSED),
-                error = obj.optString("error").ifBlank { null },
+                state = safeState,
+                error = restoredError,
+                errorKind = runCatching {
+                    obj.optString("errorKind").takeIf { it.isNotBlank() }?.let(TransferErrorKind::valueOf)
+                }.getOrNull(),
+                warning = obj.optString("warning").takeIf { it.isNotBlank() },
                 resumeOffset = obj.optLong("resumeOffset"),
                 conflictPolicy = runCatching {
                     ConflictPolicy.valueOf(obj.optString("conflictPolicy", "ASK"))

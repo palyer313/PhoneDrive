@@ -18,8 +18,10 @@
   "target": {"deviceId": "...", "path": "/Documents/a.zip"},
   "size": 123456789,
   "transferred": 0,
-  "state": "queued|running|paused|verifying|done|failed|canceled",
+  "state": "queued|running|paused|verifying|done|failed|canceled|skipped",
   "error": null,
+  "warning": null,
+  "errorKind": "network|no_space|permission|not_found|conflict|integrity|unknown",
   "resumeOffset": 0,
   "sha256": "hex-or-null",
   "createdAt": 0, "updatedAt": 0
@@ -41,8 +43,9 @@
 
 1. 执行完整 copy 流程（含校验）。
 2. 二次 `STAT` 确认目标文件存在且大小一致。
-3. 删除源文件。
+3. 删除源文件；目录移动必须先逐项改名到同目录暂存名，全部就绪后再删除，失败时恢复未删除项并报告已删除数量。
 4. 若步骤 1-2 任一步失败：保留源文件，清理目标临时文件，任务标记 failed。
+5. `done` 不得同时携带 `error`。做完目标提交但源删除失败时标记 `failed`；非致命信息写入 `warning`。
 
 ## 5. 断点续传
 
@@ -58,11 +61,11 @@
 | 策略 | 行为 |
 |---|---|
 | 覆盖 | 删除旧文件后走正常流程 |
-| 跳过 | 任务标记 done(skipped) |
+| 跳过 | 任务标记 `skipped` |
 | 重命名 | 自动改为 `name (2).ext` |
 | 保留两份 | 同重命名 |
 
-禁止默认静默覆盖。
+禁止默认静默覆盖。`ask` 必须由 UI 显式选择；引擎在未取得决策时遇到冲突应失败并保留原文件，不能把 `ask` 当作重命名处理。
 
 ## 7. 并发与限速
 
@@ -74,4 +77,6 @@
 
 - 网络错误：指数退避（1s/2s/4s/8s，上限 30s），最多自动重试 5 次，之后标记 failed 等待手动重试。
 - 认证错误（Host Key 变化 / 公钥被拒）：立即停止并提示，不重试。
-- 磁盘满：fail-fast，清理临时文件。
+- 磁盘满：fail-fast，清理本次任务的所有临时文件。
+- 失败必须归入 `errorKind` 六类之一（网络/空间/权限/不存在/冲突/完整性），供 UI 决定清理、重试或提示用户。
+- 损坏的任务持久化文件必须写诊断日志并保留副本，不能用空列表静默覆盖。

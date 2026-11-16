@@ -33,6 +33,10 @@ public sealed class TransferManager : ObservableObject, IDisposable
             () => _engine.Cancel(SelectedRow!.TaskId), () => SelectedRow?.CanCancel == true);
         RetryCommand = new RelayCommand(
             () => _engine.Retry(SelectedRow!.TaskId), () => SelectedRow?.CanRetry == true);
+        RetryRenameCommand = new RelayCommand(
+            () => _engine.Retry(SelectedRow!.TaskId, ConflictPolicy.Rename), () => SelectedRow?.CanRetry == true);
+        RetryOverwriteCommand = new RelayCommand(
+            () => _engine.Retry(SelectedRow!.TaskId, ConflictPolicy.Overwrite), () => SelectedRow?.CanRetry == true);
         ClearCompletedCommand = new RelayCommand(ClearCompleted, () => HasCompleted);
 
         _engine.TaskUpdated += OnTaskUpdated;
@@ -46,6 +50,8 @@ public sealed class TransferManager : ObservableObject, IDisposable
     public RelayCommand ResumeCommand { get; }
     public RelayCommand CancelCommand { get; }
     public RelayCommand RetryCommand { get; }
+    public RelayCommand RetryRenameCommand { get; }
+    public RelayCommand RetryOverwriteCommand { get; }
     public RelayCommand ClearCompletedCommand { get; }
 
     /// <summary>传输完成（供 UI 刷新目标窗格）</summary>
@@ -61,6 +67,8 @@ public sealed class TransferManager : ObservableObject, IDisposable
             ResumeCommand.RaiseCanExecuteChanged();
             CancelCommand.RaiseCanExecuteChanged();
             RetryCommand.RaiseCanExecuteChanged();
+            RetryRenameCommand.RaiseCanExecuteChanged();
+            RetryOverwriteCommand.RaiseCanExecuteChanged();
         }
     }
 
@@ -114,11 +122,11 @@ public sealed class TransferManager : ObservableObject, IDisposable
             row.Refresh();
             // 任务进入终态后必须刷新视图：Filter 不会因 item 属性变化重新评估，
             // 否则"显示历史"未勾选时已完成的任务仍残留在列表中
-            if (task.State is TransferState.Done or TransferState.Failed or TransferState.Canceled)
+            if (TransferStates.IsTerminal(task.State))
                 View.Refresh();
         }
 
-        if (task.State is TransferState.Done or TransferState.Failed or TransferState.Canceled)
+        if (TransferStates.IsTerminal(task.State))
             TaskFinished?.Invoke(task);
 
         OnPropertyChanged(nameof(Summary));
@@ -130,6 +138,8 @@ public sealed class TransferManager : ObservableObject, IDisposable
             ResumeCommand.RaiseCanExecuteChanged();
             CancelCommand.RaiseCanExecuteChanged();
             RetryCommand.RaiseCanExecuteChanged();
+            RetryRenameCommand.RaiseCanExecuteChanged();
+            RetryOverwriteCommand.RaiseCanExecuteChanged();
         }
     }
 

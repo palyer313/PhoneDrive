@@ -278,8 +278,10 @@ public sealed class FileOperationService : IDisposable
             return 0; // 源与目标同一路径，跳过避免自覆盖
 
         var existing = target.Stat(targetPath);
+        if (existing?.IsDirectory == true)
+            throw new TransferException(TransferErrorKind.Conflict,
+                $"同步已停止：目标同名项是目录，不能用文件替换：{targetPath}");
         var needsCopy = existing == null ||
-                        existing.IsDirectory ||
                         existing.Size != entry.Size ||
                         existing.Modified < entry.Modified;
         if (!needsCopy) return 0;
@@ -406,9 +408,9 @@ public sealed class FileOperationService : IDisposable
         {
             var task = _engine.GetTask(id);
             if (task == null) continue;
-            if (task.State is TransferState.Done or TransferState.Failed or TransferState.Canceled)
+            if (TransferStates.IsTerminal(task.State))
             {
-                if (task.State != TransferState.Done) group.HadFailure = true;
+                if (task.State != TransferState.Done || task.Warning != null) group.HadFailure = true;
                 continue;
             }
             group.Pending.Add(id);
@@ -425,7 +427,7 @@ public sealed class FileOperationService : IDisposable
 
     private void OnTaskUpdated(TransferTask task)
     {
-        if (task.State is not (TransferState.Done or TransferState.Failed or TransferState.Canceled))
+        if (!TransferStates.IsTerminal(task.State))
             return;
 
         foreach (var group in _moveGroups.Values)
@@ -435,11 +437,13 @@ public sealed class FileOperationService : IDisposable
             lock (group)
             {
                 if (!group.Pending.Remove(task.TaskId)) continue;
-                if (task.State != TransferState.Done) group.HadFailure = true;
+                if (task.State != TransferState.Done || task.Warning != null) group.HadFailure = true;
 
                 if (group.Pending.Count == 0)
                 {
                     _moveGroups.TryRemove(group.Id, out _);
+                    if (group.HadFailure)
+                        Report("移动未完全成功：失败或跳过的源文件已保留，未删除源目录");
                     DeleteEmptyDirectories(group);
                 }
             }

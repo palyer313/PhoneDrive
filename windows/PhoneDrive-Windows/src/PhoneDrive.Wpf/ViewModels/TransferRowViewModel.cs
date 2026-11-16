@@ -27,7 +27,7 @@ public sealed class TransferRowViewModel : ObservableObject
     {
         get
         {
-            if (Task.State is TransferState.Done or TransferState.Failed or TransferState.Canceled)
+            if (TransferStates.IsTerminal(Task.State))
                 return "—";
             if (Task.EtaSeconds is null) return "—";
             var span = TimeSpan.FromSeconds(Math.Max(0, Task.EtaSeconds.Value));
@@ -53,20 +53,21 @@ public sealed class TransferRowViewModel : ObservableObject
         TransferState.Running => "传输中",
         TransferState.Paused => "已暂停",
         TransferState.Verifying => "校验中",
-        TransferState.Done => "完成",
+        TransferState.Done => string.IsNullOrWhiteSpace(Task.Warning) ? "完成" : "完成（注意）",
         TransferState.Failed => "失败",
         TransferState.Canceled => "已取消",
+        TransferState.Skipped => "已跳过",
         _ => Task.State.ToString(),
     };
 
-    public string Error => Task.Error ?? "";
-    public bool HasError => !string.IsNullOrEmpty(Task.Error);
-    public bool IsActive => Task.State is not (TransferState.Done or TransferState.Failed or TransferState.Canceled);
+    public string Error => Task.Error ?? Task.Warning ?? "";
+    public bool HasError => !string.IsNullOrEmpty(Error);
+    public bool IsActive => !TransferStates.IsTerminal(Task.State);
 
     public bool CanPause => Task.State is TransferState.Running or TransferState.Queued;
     public bool CanResume => Task.State == TransferState.Paused;
     public bool CanCancel => IsActive;
-    public bool CanRetry => Task.State is TransferState.Failed or TransferState.Canceled;
+    public bool CanRetry => Task.State is TransferState.Failed or TransferState.Canceled or TransferState.Skipped;
 
     public string Sha256 => Task.Sha256 ?? "";
 
